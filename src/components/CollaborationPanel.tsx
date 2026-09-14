@@ -4,13 +4,15 @@ import './CollaborationPanel.css';
 interface CollabPanelProps {
   active: boolean;
   roomName?: string;
-  onStart: (opts: { roomName: string; signalingUrl: string }) => void;
+  positionLabel?: string;
+  onStart: (opts: { roomName: string; signalingUrl: string | null }) => void;
   onStop: () => void;
 }
 
-export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomName, onStart, onStop }) => {
+export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomName, positionLabel, onStart, onStop }) => {
   const [roomInput, setRoomInput] = useState('MDNotepad-room');
   const [signalingUrl, setSignalingUrl] = useState('');
+  const [auto, setAuto] = useState(true);
 
   return (
     <div className="collab-panel">
@@ -18,6 +20,7 @@ export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomNam
       {active ? (
         <div className="collab-controls">
           <p>セッション中: {roomName ?? '(ルームなし)'}</p>
+          {positionLabel && <p className="collab-status">{positionLabel}</p>}
           <button className="btn-secondary" onClick={onStop}>共同編集を終了</button>
         </div>
       ) : (
@@ -32,20 +35,30 @@ export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomNam
               placeholder="例: 議事録-2026-09-14"
             />
           </div>
-          <div className="form-group">
-            <label htmlFor="collab-signal">シグナリングサーバー URL (組織内の指定 URL)</label>
+          <label className="collab-auto">
             <input
-              id="collab-signal"
-              type="text"
-              value={signalingUrl}
-              onChange={(e) => setSignalingUrl(e.target.value)}
-              placeholder="ws://社内サーバ:4444"
+              type="checkbox"
+              checked={auto}
+              onChange={(e) => setAuto(e.target.checked)}
             />
-          </div>
+            保存済み文書のフォルダからホストを自動検出 (最初に起動した端末がサーバになります)
+          </label>
+          {!auto && (
+            <div className="form-group">
+              <label htmlFor="collab-signal">シグナリングサーバー URL (手動指定)</label>
+              <input
+                id="collab-signal"
+                type="text"
+                value={signalingUrl}
+                onChange={(e) => setSignalingUrl(e.target.value)}
+                placeholder="ws://社内サーバ:42100"
+              />
+            </div>
+          )}
           <button
             className="btn-secondary"
-            disabled={!roomInput || !signalingUrl}
-            onClick={() => onStart({ roomName: roomInput, signalingUrl })}
+            disabled={!roomInput || (!auto && !signalingUrl)}
+            onClick={() => onStart({ roomName: roomInput, signalingUrl: auto ? null : signalingUrl })}
           >
             セッション開始
           </button>

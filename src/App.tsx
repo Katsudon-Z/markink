@@ -16,7 +16,9 @@ function App() {
   const [showCollab, setShowCollab] = useState(false);
   const [collabActive, setCollabActive] = useState(false);
   const [collabRoom, setCollabRoom] = useState('');
+  const [collabRole, setCollabRole] = useState<string | null>(null);
   const [currentPath, setCurrentPath] = useState<string | null>(null);
+  const [currentDir, setCurrentDir] = useState<string | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const sessionRef = useRef<CollabSession | null>(null);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -41,6 +43,7 @@ function App() {
     if (!view) return;
     view.updateState(createEditorState(content));
     setCurrentPath(path);
+    setCurrentDir(path ? path.replace(/[\\/][^\\/]*$/, '') : null);
     setDocumentTitle(title);
   }, []);
 
@@ -67,21 +70,36 @@ function App() {
     sessionRef.current = null;
     setCollabActive(false);
     setCollabRoom('');
+    setCollabRole(null);
+    void invoke('collab_release_signal').catch(() => {});
     stopCollabSession(session);
     return session;
   }, []);
 
-  const handleCollabStart = useCallback(({ roomName, signalingUrl }: { roomName: string; signalingUrl: string }) => {
+  const handleCollabStart = useCallback(async ({ roomName, signalingUrl }: { roomName: string; signalingUrl: string | null }) => {
     const view = viewRef.current;
     if (!view) return;
-    const session = startCollabSession({ roomName, signalingUrl });
+    let url: string;
+    if (signalingUrl) {
+      url = signalingUrl;
+      setCollabRole('(手動指定サーバに接続)');
+    } else {
+      // C案: 保存済み文書フォルダ上でホスト発見/サーバ起動
+      const info = await invoke<{ role: string; url: string }>('collab_resolve_signal', {
+        docDir: currentDir ?? '',
+        room: roomName
+      });
+      url = info.url;
+      setCollabRole(info.role === 'host' ? 'この端末がシグナリングサーバです (ホスト)' : '既存ホストに参加');
+    }
+    const session = startCollabSession({ roomName, signalingUrl: url });
     sessionRef.current = session;
     // ルームの最初の参加者なら現行の内容を共有
     seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
     view.updateState(createCollabEditorState(session));
     setCollabActive(true);
     setCollabRoom(roomName);
-  }, []);
+  }, [currentDir]);
 
   const handleCollabStop = useCallback(() => {
     const view = viewRef.current;
@@ -192,7 +210,8 @@ function App() {
         <CollaborationPanel
           active={collabActive}
           roomName={collabRoom}
-          onStart={handleCollabStart}
+          positionLabel={collabRole ?? undefined}
+          onStart={(opts) => void handleCollabStart(opts)}
           onStop={handleCollabStop}
         />
       )}
