@@ -1,0 +1,112 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Segoe UI', Meiryo, sans-serif;
+}
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background: #f0f0f0;
+  border-bottom: 1px solid #ddd;
+}
+
+.app-title {
+  font-size: 18px;
+  font-weight: normal;
+}
+
+.app-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  padding: 6px 12px;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn:hover {
+  background: #e9e9e9;
+}
+
+.btn-primary {
+  background: #1e6fda;
+  border-color: #1e6fda;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #155cb8;
+}
+
+.app-main {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 復元提案ダイアログ (requirements.md:48) */
+.restore-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.restore-dialog {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.restore-title {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.restore-message {
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+
+.restore-preview {
+  max-height: 120px;
+  overflow-y: auto;
+  background: #f7f7f7;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  margin-bottom: 12px;
+}
+
+.restore-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

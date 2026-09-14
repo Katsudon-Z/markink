@@ -1,0 +1,78 @@
+.editor-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  font-family: 'Segoe UI', Meiryo, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  outline: none;
+}
+
+.editor .ProseMirror {
+  outline: none;
+  white-space: pre-wrap;
+}
+
+/* ProseMirror 基本スタイル */
+.ProseMirror {
+  min-height: 100%;
+}
+
+.ProseMirror p {
+  margin: 0.5em 0;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: bold;
+}
+
+.ProseMirror h1 { font-size: 2em; }
+.ProseMirror h2 { font-size: 1.5em; }
+.ProseMirror h3 { font-size: 1.17em; }
+
+.ProseMirror ul,
+.ProseMirror ol {
+  margin: 0.5em 0;
+  padding-left: 2em;
+}
+
+.ProseMirror blockquote {
+  border-left: 3px solid #ddd;
+  margin: 0.5em 0;
+  padding-left: 1em;
+  color: #666;
+}
+
+.ProseMirror code {
+  background: #f4f4f4;
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: 'Consolas', monospace;
+}
+
+.ProseMirror pre {
+  background: #f4f4f4;
+  padding: 1em;
+  border-radius: 5px;
+  overflow-x: auto;
+}
+
+.ProseMirror pre code {
+  background: none;
+  padding: 0;
+}
+
+/* フォーカス時のスタイル */
+.ProseMirror-focused {
+  outline: none;
+}

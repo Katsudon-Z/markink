@@ -1,0 +1,35 @@
+.collab-panel {
+  padding: 12px;
+  background: #f9f9f9;
+  border-bottom: 1px solid #ddd;
+}
+
+.collab-controls {
+  margin-top: 8px;
+}
+
+.form-group {
+  margin: 8px 0;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.btn-secondary {
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+}

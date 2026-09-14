@@ -1,0 +1,28 @@
+# dependencies
+node_modules
+dist
+dist-tauri
+
+# testing
+coverage
+
+# production
+build
+*.log
+
+# Tauri
+src-tauri/target
+src-tauri/gen
+src-tauri/src-tauri
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# temp files
+*.tmp
+*.temp
