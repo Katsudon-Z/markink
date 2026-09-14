@@ -97,7 +97,7 @@ fn read_autosave(app: tauri::AppHandle) -> Result<Option<String>, String> {
 }
 
 mod collab_host;
-use collab_host::{collab_release_signal, collab_resolve_signal};
+use collab_host::{collab_probe_signal, collab_release_signal, collab_resolve_signal};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -115,6 +115,7 @@ pub fn run() {
             read_autosave,
             delete_autosave,
             collab_resolve_signal,
+            collab_probe_signal,
             collab_release_signal
         ])
         .run(tauri::generate_context!())

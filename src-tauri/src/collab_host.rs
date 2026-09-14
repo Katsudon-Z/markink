@@ -61,16 +61,27 @@ fn probe_host(ip: &str, port: u16) -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok()
 }
 
-/// LAN 上での自 IP 取得 (パケット送出なし)
+/// LAN 上での自 IP 取得: インターフェース列挙から非ループバック IPv4 を選択
 fn local_lan_ip() -> Option<String> {
-    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    sock.connect("239.255.255.250:9").ok()?;
-    let addr = sock.local_addr().ok()?;
-    if addr.ip() == IpAddr::from([127, 0, 0, 1]) {
-        None
-    } else {
-        Some(addr.ip().to_string())
+    match local_ip_address::local_ip() {
+        Ok(IpAddr::V4(v4)) if !v4.is_loopback() => return Some(v4.to_string()),
+        _ => {}
     }
+    // local_ip() は経路優先の 1 候補のみ。フォールバックとして全インターフェースを確認
+    let mut candidates: Vec<std::net::Ipv4Addr> = local_ip_address::list_afinet_netifas()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(_, ip)| match ip {
+            IpAddr::V4(v4) if !v4.is_loopback() => Some(v4),
+            _ => None,
+        })
+        .collect();
+    candidates.sort_by_key(|v4| {
+        let octets = v4.octets();
+        // 192.168/10/172.16 を優先
+        if octets[0] == 192 && octets[1] == 168 { 0 } else { 1 }
+    });
+    candidates.first().map(|v4| v4.to_string())
 }
 
 /// 非同期: マーカー参照 + bind 競争でホスト/参加を決める
@@ -269,6 +280,31 @@ pub async fn collab_resolve_signal(app: tauri::AppHandle, doc_dir: String, room:
 pub fn collab_release_signal() {
     release();
     release_server();
+}
+
+/// 参照のみ: 既存ホストが生きていれば参加 URL を返す (bind しない・書き込まない)
+pub async fn probe_signal(doc_dir: &Path) -> Option<SignalInfo> {
+    let marker_path = marker_path_for(doc_dir).ok()?;
+    let content = std::fs::read_to_string(&marker_path).ok()?;
+    let marker = serde_json::from_str::<HostMarker>(&content).ok()?;
+    if probe_host(&marker.ip, marker.port) {
+        Some(SignalInfo {
+            role: "client".into(),
+            url: format!("ws://{}:{}", marker.ip, marker.port),
+        })
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
+pub async fn collab_probe_signal(app: tauri::AppHandle, doc_dir: String) -> Result<Option<SignalInfo>, String> {
+    let dir: PathBuf = if doc_dir.is_empty() {
+        fallback_dir(&app)
+    } else {
+        PathBuf::from(doc_dir)
+    };
+    Ok(probe_signal(&dir).await)
 }
 
 fn release_server() {

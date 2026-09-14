@@ -4,13 +4,14 @@ import './CollaborationPanel.css';
 interface CollabPanelProps {
   active: boolean;
   roomName?: string;
+  suggestedRoom?: string;
   positionLabel?: string;
   onStart: (opts: { roomName: string; signalingUrl: string | null }) => void;
   onStop: () => void;
 }
 
-export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomName, positionLabel, onStart, onStop }) => {
-  const [roomInput, setRoomInput] = useState('MDNotepad-room');
+export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomName, suggestedRoom, positionLabel, onStart, onStop }) => {
+  const [roomInput, setRoomInput] = useState(suggestedRoom ?? 'MDNotepad-room');
   const [signalingUrl, setSignalingUrl] = useState('');
   const [auto, setAuto] = useState(true);
 

@@ -17,6 +17,7 @@ function App() {
   const [collabActive, setCollabActive] = useState(false);
   const [collabRoom, setCollabRoom] = useState('');
   const [collabRole, setCollabRole] = useState<string | null>(null);
+  const [suggestedRoom, setSuggestedRoom] = useState<string | undefined>(undefined);
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [currentDir, setCurrentDir] = useState<string | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -76,30 +77,34 @@ function App() {
     return session;
   }, []);
 
-  const handleCollabStart = useCallback(async ({ roomName, signalingUrl }: { roomName: string; signalingUrl: string | null }) => {
+  const ensureCollabSession = useCallback(async (roomName: string, signalingUrl: string | null) => {
     const view = viewRef.current;
-    if (!view) return;
-    let url: string;
-    if (signalingUrl) {
-      url = signalingUrl;
-      setCollabRole('(手動指定サーバに接続)');
-    } else {
+    if (!view || sessionRef.current) return false;
+    let url = signalingUrl;
+    let roleLabel: string | null = null;
+    if (!url) {
       // C案: 保存済み文書フォルダ上でホスト発見/サーバ起動
       const info = await invoke<{ role: string; url: string }>('collab_resolve_signal', {
         docDir: currentDir ?? '',
         room: roomName
       });
       url = info.url;
-      setCollabRole(info.role === 'host' ? 'この端末がシグナリングサーバです (ホスト)' : '既存ホストに参加');
+      roleLabel = info.role === 'host' ? 'この端末がシグナリングサーバです (ホスト)' : '既存ホストに参加';
     }
-    const session = startCollabSession({ roomName, signalingUrl: url });
+    const session = startCollabSession({ roomName, signalingUrl: url as string });
     sessionRef.current = session;
     // ルームの最初の参加者なら現行の内容を共有
     seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
     view.updateState(createCollabEditorState(session));
     setCollabActive(true);
     setCollabRoom(roomName);
+    setCollabRole(roleLabel);
+    return true;
   }, [currentDir]);
+
+  const handleCollabStart = useCallback(({ roomName, signalingUrl }: { roomName: string; signalingUrl: string | null }) => {
+    void ensureCollabSession(roomName, signalingUrl).catch((e) => window.alert(String(e)));
+  }, [ensureCollabSession]);
 
   const handleCollabStop = useCallback(() => {
     const view = viewRef.current;
@@ -140,6 +145,18 @@ function App() {
     try {
       const content = await invoke<string>('read_markdown', { path });
       loadMarkdown(content, path.split(/[\\/]/).pop() || path, path);
+      // 既存シグナリングサーバがあれば共同編集を自動開始
+      const found = await invoke<{ role: string; url: string } | null>('collab_probe_signal', {
+        docDir: path ? path.replace(/[\\/][^\\/]*$/, '') : ''
+      });
+      if (found) {
+        const stem = (path.split(/[\\/]/).pop() || '文書').replace(/\.(md|markdown)$/i, '');
+        setCollabRole('既存ホストに参加');
+        setShowCollab(true);
+        await ensureCollabSession(stem, found.url);
+      } else {
+        setSuggestedRoom((path.split(/[\\/]/).pop() || '文書').replace(/\.(md|markdown)$/i, ''));
+      }
     } catch (e) {
       window.alert(String(e));
     }
@@ -210,6 +227,7 @@ function App() {
         <CollaborationPanel
           active={collabActive}
           roomName={collabRoom}
+          suggestedRoom={suggestedRoom}
           positionLabel={collabRole ?? undefined}
           onStart={(opts) => void handleCollabStart(opts)}
           onStop={handleCollabStop}
