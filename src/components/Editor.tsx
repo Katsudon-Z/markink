@@ -6,41 +6,44 @@ import './Editor.css';
 
 interface EditorProps {
   onReady?: (view: EditorView) => void;
-  docDir?: string | null;
+  /** 文書が変化したとき (自動保存の契機) */
+  onChange?: () => void;
+  /** 画像保存先フォルダの取得 (文書を切り替えても最新を参照) */
+  getDocDir?: () => string | null;
 }
 
-export const Editor: React.FC<EditorProps> = ({ onReady, docDir }) => {
+export const Editor = React.memo(function Editor({ onReady, onChange, getDocDir }: EditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<EditorView | null>(null);
-  const docDirRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    docDirRef.current = docDir ?? null;
-  }, [docDir]);
+  const onChangeRef = useRef(onChange);
+  const onReadyRef = useRef(onReady);
+  const getDocDirRef = useRef(getDocDir);
+  onChangeRef.current = onChange;
+  onReadyRef.current = onReady;
+  getDocDirRef.current = getDocDir;
 
   useEffect(() => {
     if (!editorRef.current) return;
-    const view = createEditorView(editorRef.current);
-    docDirRef.current = docDir ?? null;
-    const onFile = handleImageDropPasteFactory(() => docDirRef.current);
+    const view = createEditorView(editorRef.current, undefined, () => onChangeRef.current?.());
+    const onFile = handleImageDropPasteFactory(() => getDocDirRef.current?.() ?? null);
 
-    view.dom.addEventListener('drop', (e: DragEvent) => {
+    const handleDrop = (e: DragEvent) => {
       const file = e.dataTransfer?.files?.[0];
       if (!file) return;
       e.preventDefault();
       e.stopPropagation();
       const pos = view.posAtCoords({ left: e.clientX, top: e.clientY });
       void onFile(file, view, pos?.pos ?? null);
-    });
-    view.dom.addEventListener('dragover', (e: DragEvent) => {
-      e.preventDefault();
-    });
+    };
+    const handleDragOver = (e: DragEvent) => e.preventDefault();
 
-    onReady?.(view);
-    viewRef.current = view;
+    view.dom.addEventListener('drop', handleDrop);
+    view.dom.addEventListener('dragover', handleDragOver);
+
+    onReadyRef.current?.(view);
     return () => {
+      view.dom.removeEventListener('drop', handleDrop);
+      view.dom.removeEventListener('dragover', handleDragOver);
       view.destroy();
-      viewRef.current = null;
     };
   }, []);
 
@@ -49,4 +52,4 @@ export const Editor: React.FC<EditorProps> = ({ onReady, docDir }) => {
       <div ref={editorRef} className="editor" />
     </div>
   );
-};
+});

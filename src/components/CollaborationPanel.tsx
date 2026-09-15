@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import type { CollabDiagnostics } from '../hooks/useCollabSession';
+import { CollabStatus } from './CollabStatus';
 import './CollaborationPanel.css';
 
 interface CollabPanelProps {
@@ -7,15 +9,23 @@ interface CollabPanelProps {
   suggestedRoom?: string;
   positionLabel?: string;
   peers?: { clientID: number; name: string; color: string }[];
-  webrtcPeerCount?: number;
-  syncLabel?: string;
+  diagnostics: CollabDiagnostics;
   onStart: (opts: { roomName: string; signalingUrl: string | null }) => void;
   onStop: () => void;
 }
 
 const DEFAULT_ROOM = 'MDNotepad-room';
 
-export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomName, suggestedRoom, positionLabel, peers, webrtcPeerCount, syncLabel, onStart, onStop }) => {
+export const CollaborationPanel: React.FC<CollabPanelProps> = ({
+  active,
+  roomName,
+  suggestedRoom,
+  positionLabel,
+  peers,
+  diagnostics,
+  onStart,
+  onStop
+}) => {
   const [roomInput, setRoomInput] = useState(suggestedRoom ?? DEFAULT_ROOM);
   const [roomLocked, setRoomLocked] = useState(suggestedRoom != null);
   const [signalingUrl, setSignalingUrl] = useState('');
@@ -36,10 +46,7 @@ export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomNam
         <div className="collab-controls">
           <p>セッション中: {roomName ?? '(ルームなし)'}</p>
           {positionLabel && <p className="collab-status">{positionLabel}</p>}
-          {webrtcPeerCount != null && (
-            <p className="collab-status">P2P 接続中: {webrtcPeerCount}台(自身を含む)</p>
-          )}
-          {syncLabel && <p className="collab-status">{syncLabel}</p>}
+          <CollabStatus diagnostics={diagnostics} />
           {peers && peers.length > 0 && (
             <div className="collab-peers">
               <p>接続中の参加者 ({peers.length}人):</p>

@@ -34,13 +34,18 @@ export function createEditorState(initialMarkdown?: string) {
   });
 }
 
-export function createEditorView(element: HTMLElement, state?: EditorState): EditorView {
+export function createEditorView(
+  element: HTMLElement,
+  state?: EditorState,
+  onUpdate?: () => void
+): EditorView {
   const editorState = state || createEditorState();
   const view = new EditorView(element, {
     state: editorState,
     dispatchTransaction(tr) {
       const newState = view.state.apply(tr);
       view.updateState(newState);
+      if (tr.docChanged) onUpdate?.();
     }
   });
   return view;

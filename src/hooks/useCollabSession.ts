@@ -1,0 +1,242 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { EditorView } from 'prosemirror-view';
+import {
+  startCollabSession,
+  stopCollabSession,
+  listPeers,
+  type CollabSession,
+  type PeerInfo
+} from '../lib/collaboration/session';
+import { createCollabEditorState, seedFragmentFromProseMirror, fragmentToMarkdown } from '../lib/prosemirror/collab';
+import { ipc, type RelayStats } from '../lib/ipc';
+
+const DIAGNOSTICS_INTERVAL_MS = 2000;
+
+export interface CollabDiagnostics {
+  webrtcPeerCount: number | null;
+  syncedFlag: boolean | null;
+  ydocUpdates: number;
+  lastSyncAt: string | null;
+  relayStatus: string | null;
+  relaySynced: boolean | null;
+  relayStats: RelayStats | null;
+}
+
+const EMPTY_DIAGNOSTICS: CollabDiagnostics = {
+  webrtcPeerCount: null,
+  syncedFlag: null,
+  ydocUpdates: 0,
+  lastSyncAt: null,
+  relayStatus: null,
+  relaySynced: null,
+  relayStats: null
+};
+
+function sameDiagnostics(a: CollabDiagnostics, b: CollabDiagnostics): boolean {
+  return (
+    a.webrtcPeerCount === b.webrtcPeerCount &&
+    a.syncedFlag === b.syncedFlag &&
+    a.ydocUpdates === b.ydocUpdates &&
+    a.lastSyncAt === b.lastSyncAt &&
+    a.relayStatus === b.relayStatus &&
+    a.relaySynced === b.relaySynced &&
+    a.relayStats?.rx === b.relayStats?.rx &&
+    a.relayStats?.tx === b.relayStats?.tx &&
+    a.relayStats?.subs === b.relayStats?.subs
+  );
+}
+
+export function formatSyncLabel(diag: CollabDiagnostics): string {
+  const synced = diag.syncedFlag || diag.relaySynced;
+  const syncText =
+    synced ? '済み' : diag.syncedFlag == null && diag.relaySynced == null ? '確認中' : '未同期';
+  const relayText = diag.relayStatus ?? '不明';
+  const relaySyncedText =
+    diag.relaySynced == null ? '' : diag.relaySynced ? '(同期済み)' : '(未同期)';
+  const statsText = diag.relayStats
+    ? ` / 中継転送: 受信${diag.relayStats.rx}/送信${diag.relayStats.tx}/接続${diag.relayStats.subs}`
+    : '';
+  const lastText = diag.lastSyncAt ? ` / 最終 ${diag.lastSyncAt}` : '';
+  return `同期: ${syncText} / 中継: ${relayText}${relaySyncedText}${statsText} / 文書更新 ${diag.ydocUpdates}回${lastText}`;
+}
+
+interface UseCollabSessionOptions {
+  getView: () => EditorView | null;
+  getDocDir: () => string | null;
+  /** パネルが開いている間だけ診断ポーリングを行う (軽快さ優先) */
+  diagnosticsEnabled: boolean;
+  /** Yjs 文書が変化したとき (自動保存の契機) */
+  onDocumentChanged?: () => void;
+}
+
+export function useCollabSession({
+  getView,
+  getDocDir,
+  diagnosticsEnabled,
+  onDocumentChanged
+}: UseCollabSessionOptions) {
+  const [active, setActive] = useState(false);
+  const [roomName, setRoomName] = useState('');
+  const [roleLabel, setRoleLabel] = useState<string | null>(null);
+  const [peers, setPeers] = useState<PeerInfo[]>([]);
+  const [diagnostics, setDiagnostics] = useState<CollabDiagnostics>(EMPTY_DIAGNOSTICS);
+
+  const sessionRef = useRef<CollabSession | null>(null);
+  const updateCountRef = useRef(0);
+  const lastUpdateTimeRef = useRef<string | null>(null);
+  const relayStatusRef = useRef<string | null>(null);
+  const relaySyncedRef = useRef<boolean | null>(null);
+  const relayStatsRef = useRef<RelayStats | null>(null);
+
+  const onDocumentChangedRef = useRef(onDocumentChanged);
+  onDocumentChangedRef.current = onDocumentChanged;
+
+  const stop = useCallback(() => {
+    const session = sessionRef.current;
+    if (!session) return null;
+    sessionRef.current = null;
+    void ipc.releaseSignal().catch(() => {});
+    stopCollabSession(session);
+    updateCountRef.current = 0;
+    lastUpdateTimeRef.current = null;
+    relayStatusRef.current = null;
+    relaySyncedRef.current = null;
+    relayStatsRef.current = null;
+    setActive(false);
+    setRoomName('');
+    setRoleLabel(null);
+    setPeers([]);
+    setDiagnostics(EMPTY_DIAGNOSTICS);
+    return session;
+  }, []);
+
+  /** セッションを開始する。signalingUrl が null なら C案のホスト自動検出を行う */
+  const ensure = useCallback(
+    async (room: string, signalingUrl: string | null, seedIfHost = true): Promise<boolean> => {
+      const view = getView();
+      if (!view || sessionRef.current) return false;
+
+      let url = signalingUrl;
+      let label: string | null = null;
+      let shouldSeed = seedIfHost;
+      if (!url) {
+        const info = await ipc.resolveSignal(getDocDir() ?? '', room);
+        url = info.url;
+        label = info.role === 'host' ? 'この端末がシグナリングサーバです (ホスト)' : '既存ホストに参加';
+        if (seedIfHost) shouldSeed = info.role === 'host';
+      }
+
+      const session = startCollabSession({ roomName: room, signalingUrl: url });
+      sessionRef.current = session;
+
+      const updatePeers = () => setPeers(listPeers(session.awareness, session.doc.clientID));
+      updatePeers();
+      session.awareness.on('change', updatePeers);
+
+      updateCountRef.current = 0;
+      lastUpdateTimeRef.current = null;
+      session.doc.on('update', () => {
+        updateCountRef.current += 1;
+        lastUpdateTimeRef.current = new Date().toLocaleTimeString('ja-JP');
+        onDocumentChangedRef.current?.();
+      });
+
+      relayStatusRef.current = session.relay ? '接続中' : '無効';
+      relaySyncedRef.current = session.relay ? false : null;
+      try {
+        session.relay?.on('status', (e: { status: string }) => {
+          relayStatusRef.current =
+            e.status === 'connected' ? '接続済み' : e.status === 'disconnected' ? '切断' : '接続中';
+        });
+        session.relay?.on('sync', (synced: boolean) => {
+          relaySyncedRef.current = synced === true;
+        });
+      } catch {
+        /* ignore */
+      }
+
+      if (shouldSeed) {
+        // ホスト(ルームの最初の参加者)が現行の内容を共有
+        seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
+      }
+      view.updateState(createCollabEditorState(session, view.state.doc));
+
+      setActive(true);
+      setRoomName(room);
+      setRoleLabel(label);
+      return true;
+    },
+    [getView, getDocDir]
+  );
+
+  // 診断ポーリング (パネル表示中かつセッション中のみ・2秒間隔・変化時のみ再描画)
+  useEffect(() => {
+    if (!active || !diagnosticsEnabled) return;
+    let cancelled = false;
+
+    const collect = () => {
+      const session = sessionRef.current;
+      if (!session) return;
+      const provider = session.provider as unknown as {
+        room: { webrtcConns: Map<string, { connected: boolean }> } | null;
+        synced: boolean;
+      };
+      let peerCount: number | null = null;
+      let syncedFlag: boolean | null = null;
+      if (provider.room) {
+        let n = 1;
+        provider.room.webrtcConns.forEach((c) => {
+          if (c.connected) n += 1;
+        });
+        peerCount = n;
+        syncedFlag = provider.synced === true;
+      }
+      void ipc
+        .relayStats(session.roomName)
+        .then((s) => {
+          relayStatsRef.current = s;
+        })
+        .catch(() => {});
+      const next: CollabDiagnostics = {
+        webrtcPeerCount: peerCount,
+        syncedFlag,
+        ydocUpdates: updateCountRef.current,
+        lastSyncAt: lastUpdateTimeRef.current,
+        relayStatus: relayStatusRef.current,
+        relaySynced: relaySyncedRef.current,
+        relayStats: relayStatsRef.current
+      };
+      setDiagnostics((prev) => (sameDiagnostics(prev, next) ? prev : next));
+    };
+
+    collect();
+    const timer = setInterval(() => {
+      if (!cancelled) collect();
+    }, DIAGNOSTICS_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [active, diagnosticsEnabled]);
+
+  /** セッションを終了し、Yjs 上の内容を Markdown として返す */
+  const stopAndExtractMarkdown = useCallback((): string | null => {
+    const session = sessionRef.current;
+    if (!session) return null;
+    const markdown = fragmentToMarkdown(session.fragment);
+    stop();
+    return markdown;
+  }, [stop]);
+
+  return {
+    active,
+    roomName,
+    roleLabel,
+    peers,
+    diagnostics,
+    ensure,
+    stop,
+    stopAndExtractMarkdown,
+    setRoleLabel
+  };
+}

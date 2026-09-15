@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use yrs::sync::{Awareness, DefaultProtocol, Message as SyncMessage, Protocol};
 use yrs::updates::encoder::Encode;
-use yrs::{Doc, Transact};
+use yrs::Doc;
 
 pub type Tx = mpsc::UnboundedSender<Message>;
 
