@@ -1,12 +1,13 @@
 import { useState, useCallback, useRef } from 'react';
 import { EditorView } from 'prosemirror-view';
+import { DOMSerializer } from 'prosemirror-model';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { Editor } from './components/Editor';
 import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
-import { applyFormat, createEditorState, createCollabEditorState, seedFragmentFromProseMirror, fragmentToMarkdown, defaultMarkdownSerializer } from './lib/prosemirror/editor';
-import { startCollabSession, stopCollabSession, type CollabSession } from './lib/collaboration/session';
+import { applyFormat, createEditorState, createCollabEditorState, seedFragmentFromProseMirror, fragmentToMarkdown, defaultMarkdownSerializer, schema } from './lib/prosemirror/editor';
+import { startCollabSession, stopCollabSession, listPeers, type CollabSession, type PeerInfo } from './lib/collaboration/session';
 import './App.css';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -18,6 +19,7 @@ function App() {
   const [collabRoom, setCollabRoom] = useState('');
   const [collabRole, setCollabRole] = useState<string | null>(null);
   const [suggestedRoom, setSuggestedRoom] = useState<string | undefined>(undefined);
+  const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [currentDir, setCurrentDir] = useState<string | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -93,6 +95,11 @@ function App() {
     }
     const session = startCollabSession({ roomName, signalingUrl: url as string });
     sessionRef.current = session;
+    // 参加者リストの監視 (Phase 5: 参加者表示)
+    const awareness = session.awareness;
+    const updatePeers = () => setPeers(listPeers(awareness, session.doc.clientID));
+    updatePeers();
+    awareness.on('change', updatePeers);
     // ルームの最初の参加者なら現行の内容を共有
     seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
     view.updateState(createCollabEditorState(session));
@@ -162,6 +169,33 @@ function App() {
     }
   }, [loadMarkdown, stopSession]);
 
+  const handleExportHtml = useCallback(async () => {
+    const view = viewRef.current;
+    if (!view) return;
+    const path = await save({
+      filters: [{ name: 'HTML', extensions: ['html'] }],
+      defaultPath: (documentTitle.replace(/\.(md|markdown)$/i, '') || '無題') + '.html'
+    });
+    if (!path) return;
+    try {
+      const fragment = DOMSerializer.fromSchema(schema).serializeFragment(view.state.doc.content);
+      const body = document.createElement('div');
+      body.appendChild(fragment);
+      const html =
+        `<!doctype html>\n<html lang="ja">\n<head>\n<meta charset="utf-8">\n` +
+        `<title>${documentTitle}</title>\n<style>` +
+        `body{font-family:'Segoe UI',Meiryo,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;line-height:1.7;}` +
+        `img{max-width:100%;}pre{background:#f5f5f5;padding:1em;border-radius:6px;overflow-x:auto;}` +
+        `blockquote{border-left:3px solid #ddd;margin:.5em 0;padding-left:1em;color:#555;}` +
+        `table{border-collapse:collapse;}td,th{border:1px solid #ccc;padding:4px 8px;}` +
+        `</style>\n</head>\n<body>\n${body.innerHTML}\n</body>\n</html>\n`;
+      await invoke('write_text_file', { path, content: html });
+      window.alert('HTML を書き出しました。');
+    } catch (e) {
+      window.alert(String(e));
+    }
+  }, [documentTitle]);
+
   const saveAs = useCallback(async () => {
     const view = viewRef.current;
     if (!view) return;
@@ -217,6 +251,7 @@ function App() {
           <button className="btn" onClick={handleNew}>新規作成</button>
           <button className="btn" onClick={() => void handleOpen()}>開く</button>
           <button className="btn" onClick={handleSave}>保存</button>
+          <button className="btn" onClick={() => void handleExportHtml()}>HTML出力</button>
           <button className="btn" onClick={() => setShowCollab((v) => !v)}>共同編集</button>
         </div>
       </header>
@@ -229,13 +264,14 @@ function App() {
           roomName={collabRoom}
           suggestedRoom={suggestedRoom}
           positionLabel={collabRole ?? undefined}
+          peers={peers}
           onStart={(opts) => void handleCollabStart(opts)}
           onStop={handleCollabStop}
         />
       )}
 
       <main className="app-main">
-        <Editor onReady={handleReady} />
+        <Editor onReady={handleReady} docDir={currentDir} />
       </main>
     </div>
   );

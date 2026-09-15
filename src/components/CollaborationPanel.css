@@ -33,3 +33,6 @@
   border-radius: 4px;
   cursor: pointer;
 }
+
+.collab-peers ul { list-style: none; padding-left: 4px; margin: 4px 0; }
+.collab-peer-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }

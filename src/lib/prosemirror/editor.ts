@@ -8,8 +8,9 @@ import { history, undo, redo } from 'prosemirror-history';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { defaultMarkdownParser, defaultMarkdownSerializer } from 'prosemirror-markdown';
+import { placeholderPlugin } from './image';
 
-export { undo, redo, defaultMarkdownParser, defaultMarkdownSerializer };
+export { undo, redo, defaultMarkdownParser, defaultMarkdownSerializer, schema };
 export { createCollabEditorState, createCollabPlugins, seedFragmentFromProseMirror, fragmentToMarkdown } from './collab';
 
 export function createEditorState(initialMarkdown?: string) {
@@ -17,7 +18,19 @@ export function createEditorState(initialMarkdown?: string) {
   return EditorState.create({
     doc,
     schema,
-    plugins: [history(), keymap(baseKeymap), dropCursor(), gapCursor()]
+    plugins: [
+      history(),
+      // Ctrl+Z / Ctrl+Y の Undo/Redo (requirements.md:46)
+      keymap({
+        'Mod-z': undo,
+        'Mod-Shift-z': redo,
+        'Mod-y': redo
+      }),
+      keymap(baseKeymap),
+      dropCursor(),
+      gapCursor(),
+      placeholderPlugin('入力例: ここに入力してください。上部のボタンで見出しや箇条書きも作れます。')
+    ]
   });
 }
 

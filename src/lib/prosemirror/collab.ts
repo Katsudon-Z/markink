@@ -6,6 +6,7 @@ import { baseKeymap } from 'prosemirror-commands';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { defaultMarkdownSerializer } from 'prosemirror-markdown';
+import { placeholderPlugin } from './image';
 import {
   ySyncPlugin,
   yCursorPlugin,
@@ -33,7 +34,8 @@ export function createCollabPlugins(session: {
     }),
     keymap(baseKeymap),
     dropCursor(),
-    gapCursor()
+    gapCursor(),
+    placeholderPlugin('入力例: ここに入力してください。上部のボタンで見出しや箇条書きも作れます。')
   ];
 }
 

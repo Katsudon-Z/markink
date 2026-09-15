@@ -19,6 +19,13 @@
   white-space: pre-wrap;
 }
 
+/* 空文書ガイド (requirements.md:32) */
+.mdn-placeholder {
+  color: #999;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ProseMirror 基本スタイル */
 .ProseMirror {
   min-height: 100%;

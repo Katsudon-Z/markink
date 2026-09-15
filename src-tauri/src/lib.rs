@@ -34,6 +34,18 @@ fn write_markdown(path: String, content: String, state: State<CurrentDocument>) 
 }
 
 #[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if let Some(parent) = p.parent() {
+        if !parent.exists() {
+            return Err("保存先のフォルダが見つかりません。保存場所を確認してください。".into());
+        }
+    }
+    fs::write(p, content)
+        .map_err(|_| "HTMLを書き出せませんでした。書き込み権限を確認してください。".to_string())
+}
+
+#[tauri::command]
 fn set_document_path(path: String, state: State<CurrentDocument>) {
     *state.path.lock().unwrap() = Some(PathBuf::from(path));
 }
@@ -107,6 +119,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_markdown,
             write_markdown,
+            write_text_file,
             set_document_path,
             get_current_path,
             get_current_dir,
