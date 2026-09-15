@@ -29,3 +29,6 @@ tokio = { version = "1", features = ["net", "io-util", "sync", "time", "macros",
 tokio-tungstenite = "0.27"
 futures-util = "0.3"
 local-ip-address = "0.6.13"
+tauri-plugin-single-instance = "2.4.4"
+yrs = { version = "0.27.4", features = ["sync"] }
+urlencoding = "2.1.3"

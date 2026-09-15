@@ -39,12 +39,20 @@ export function createCollabPlugins(session: {
   ];
 }
 
-export function createCollabEditorState(session: {
-  fragment: Y.XmlFragment;
-  awareness: import('y-protocols/awareness').Awareness;
-}): EditorState {
+export function createCollabEditorState(
+  session: {
+    fragment: Y.XmlFragment;
+    awareness: import('y-protocols/awareness').Awareness;
+  },
+  // フラグメントが空(参加側で同期前)の場合の初期文書。同期到着後は自動で置換される
+  fallbackDoc?: EditorState['doc']
+): EditorState {
+  const doc =
+    session.fragment.length > 0
+      ? yXmlFragmentToProsemirror(schema, session.fragment)
+      : (fallbackDoc ?? schema.topNodeType.createAndFill()!);
   return EditorState.create({
-    doc: yXmlFragmentToProsemirror(schema, session.fragment),
+    doc,
     schema,
     plugins: createCollabPlugins(session)
   });

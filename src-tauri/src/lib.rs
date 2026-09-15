@@ -109,12 +109,65 @@ fn read_autosave(app: tauri::AppHandle) -> Result<Option<String>, String> {
 }
 
 mod collab_host;
+mod collab_relay;
 use collab_host::{collab_probe_signal, collab_release_signal, collab_resolve_signal};
+use tauri::Emitter;
+
+// .md 関連付けのダブルクリック起動用: 起動引数からファイルを受け取る
+static STARTUP_FILE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn markdown_file_arg(arg: &str) -> Option<String> {
+    let lower = arg.to_lowercase();
+    if (lower.ends_with(".md") || lower.ends_with(".markdown")) && Path::new(arg).exists() {
+        Some(arg.to_string())
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
+fn take_startup_file() -> Option<String> {
+    STARTUP_FILE.lock().unwrap().take()
+}
+
+#[tauri::command]
+fn collab_relay_stats(room: String) -> Option<crate::collab_relay::RelayStats> {
+    crate::collab_relay::relay_stats(&room)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let args: Vec<String> = std::env::args_os()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
+    let detected = args.iter().skip(1).find_map(|a| markdown_file_arg(a));
+    *STARTUP_FILE.lock().unwrap() = detected.clone();
+    // 診断用: 起動引数を一時フォルダに記録 (.md 関連付けの不具合調査用)
+    if let Ok(mut log) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(std::env::temp_dir().join("mdnotepad-startup.log"))
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            log,
+            "[{:?}] args={:?} detected={:?}",
+            std::time::SystemTime::now(),
+            args,
+            detected
+        );
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // 2重起動時は既存ウィンドウにファイルを開かせる
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(path) = argv.iter().skip(1).find_map(|a| markdown_file_arg(a)) {
+                let _ = app.emit("open-file", path);
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
+        }))
         .manage(CurrentDocument::default())
         .invoke_handler(tauri::generate_handler![
             read_markdown,
@@ -127,10 +180,30 @@ pub fn run() {
             autosave,
             read_autosave,
             delete_autosave,
+            take_startup_file,
+            collab_relay_stats,
             collab_resolve_signal,
             collab_probe_signal,
             collab_release_signal
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_file_arg_filters_markdown() {
+        let dir = std::env::temp_dir();
+        let md = dir.join("mdn-startup-test.md");
+        std::fs::write(&md, "test").unwrap();
+        let s = md.to_string_lossy().to_string();
+        assert_eq!(markdown_file_arg(&s), Some(s.clone()));
+        assert!(markdown_file_arg("C:\\no-such-dir\\x.md").is_none());
+        assert!(markdown_file_arg("--port").is_none());
+        assert!(markdown_file_arg(&md.with_extension("txt").to_string_lossy().to_string()).is_none());
+        let _ = std::fs::remove_file(&md);
+    }
 }

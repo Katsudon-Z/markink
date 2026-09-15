@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { EditorView } from 'prosemirror-view';
 import { DOMSerializer } from 'prosemirror-model';
 import { open, save } from '@tauri-apps/plugin-dialog';
@@ -7,7 +7,7 @@ import { Editor } from './components/Editor';
 import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
 import { applyFormat, createEditorState, createCollabEditorState, seedFragmentFromProseMirror, fragmentToMarkdown, defaultMarkdownSerializer, schema } from './lib/prosemirror/editor';
-import { startCollabSession, stopCollabSession, listPeers, type CollabSession, type PeerInfo } from './lib/collaboration/session';
+import { startCollabSession, stopCollabSession, listPeers, stemOfPath, type CollabSession, type PeerInfo } from './lib/collaboration/session';
 import './App.css';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -20,6 +20,16 @@ function App() {
   const [collabRole, setCollabRole] = useState<string | null>(null);
   const [suggestedRoom, setSuggestedRoom] = useState<string | undefined>(undefined);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
+  const [webrtcPeerCount, setWebrtcPeerCount] = useState<number | null>(null);
+  const [ydocUpdates, setYdocUpdates] = useState(0);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [syncedFlag, setSyncedFlag] = useState<boolean | null>(null);
+  const [relayStatus, setRelayStatus] = useState<string | null>(null);
+  const [relaySynced, setRelaySynced] = useState<boolean | null>(null);
+  const [relayStats, setRelayStats] = useState<{ rx: number; tx: number; subs: number } | null>(null);
+  const connTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const updateCountRef = useRef(0);
+  const lastUpdateTimeRef = useRef<string | null>(null);
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [currentDir, setCurrentDir] = useState<string | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -71,6 +81,20 @@ function App() {
     const session = sessionRef.current;
     if (!session) return null;
     sessionRef.current = null;
+    if (connTimer.current) {
+      clearInterval(connTimer.current);
+      connTimer.current = null;
+    }
+    setWebrtcPeerCount(null);
+    setYdocUpdates(0);
+    setLastSyncAt(null);
+    setSyncedFlag(null);
+    setRelayStatus(null);
+    setRelaySynced(null);
+    setRelayStats(null);
+    updateCountRef.current = 0;
+    lastUpdateTimeRef.current = null;
+    setPeers([]);
     setCollabActive(false);
     setCollabRoom('');
     setCollabRole(null);
@@ -79,11 +103,14 @@ function App() {
     return session;
   }, []);
 
-  const ensureCollabSession = useCallback(async (roomName: string, signalingUrl: string | null) => {
+  const ensureCollabSession = useCallback(async (roomName: string, signalingUrl: string | null, seedIfHost = true) => {
     const view = viewRef.current;
     if (!view || sessionRef.current) return false;
     let url = signalingUrl;
     let roleLabel: string | null = null;
+    // ホストだけが現行文書を共有シードする。参加側は同期到着を待つ
+    // (両方がシードすると重複マージの原因になる)
+    let shouldSeed = seedIfHost;
     if (!url) {
       // C案: 保存済み文書フォルダ上でホスト発見/サーバ起動
       const info = await invoke<{ role: string; url: string }>('collab_resolve_signal', {
@@ -92,6 +119,7 @@ function App() {
       });
       url = info.url;
       roleLabel = info.role === 'host' ? 'この端末がシグナリングサーバです (ホスト)' : '既存ホストに参加';
+      if (seedIfHost) shouldSeed = info.role === 'host';
     }
     const session = startCollabSession({ roomName, signalingUrl: url as string });
     sessionRef.current = session;
@@ -100,9 +128,58 @@ function App() {
     const updatePeers = () => setPeers(listPeers(awareness, session.doc.clientID));
     updatePeers();
     awareness.on('change', updatePeers);
-    // ルームの最初の参加者なら現行の内容を共有
-    seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
-    view.updateState(createCollabEditorState(session));
+    // 同期診断: Yjs 更新カウンタ (1秒ごとに反映)
+    updateCountRef.current = 0;
+    lastUpdateTimeRef.current = null;
+    session.doc.on('update', () => {
+      updateCountRef.current += 1;
+      lastUpdateTimeRef.current = new Date().toLocaleTimeString('ja-JP');
+    });
+    // TCP 中継の接続状態 (P2P 不通時のフォールバック経路)
+    setRelayStatus(session.relay ? '接続中' : '無効');
+    setRelaySynced(session.relay ? false : null);
+    try {
+      session.relay?.on('status', (e: { status: string }) => {
+        setRelayStatus(e.status === 'connected' ? '接続済み' : e.status === 'disconnected' ? '切断' : '接続中');
+      });
+      session.relay?.on('sync', (synced: boolean) => {
+        setRelaySynced(synced === true);
+      });
+    } catch {
+      /* ignore */
+    }
+    // P2P 接続数 + 同期状態の診断表示 (1秒ごとに更新)
+    const updateConnCount = () => {
+      // 中継サーバ側の転送カウンタ (ホストの場合のみ取得できる)
+      void invoke<{ rx: number; tx: number; subs: number } | null>('collab_relay_stats', { room: roomName })
+        .then((s) => setRelayStats(s))
+        .catch(() => {});      const provider = session.provider as unknown as {
+        room: { webrtcConns: Map<string, { connected: boolean }> } | null;
+        synced: boolean;
+      };
+      const room = provider.room;
+      if (!room) {
+        setWebrtcPeerCount(null);
+        setSyncedFlag(null);
+        return;
+      }
+      let n = 1;
+      room.webrtcConns.forEach((c) => {
+        if (c.connected) n += 1;
+      });
+      setWebrtcPeerCount(n);
+      setSyncedFlag(provider.synced === true);
+      setYdocUpdates(updateCountRef.current);
+      setLastSyncAt(lastUpdateTimeRef.current);
+    };
+    updateConnCount();
+    if (connTimer.current) clearInterval(connTimer.current);
+    connTimer.current = setInterval(updateConnCount, 1000);
+    if (shouldSeed) {
+      // ホスト(ルームの最初の参加者)が現行の内容を共有
+      seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
+    }
+    view.updateState(createCollabEditorState(session, view.state.doc));
     setCollabActive(true);
     setCollabRoom(roomName);
     setCollabRole(roleLabel);
@@ -145,10 +222,8 @@ function App() {
     void invoke('delete_autosave').catch(() => {});
   }, [loadMarkdown, stopSession]);
 
-  const handleOpen = useCallback(async () => {
+  const openFileByPath = useCallback(async (path: string) => {
     stopSession();
-    const path = await open({ filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }] });
-    if (!path) return;
     try {
       const content = await invoke<string>('read_markdown', { path });
       loadMarkdown(content, path.split(/[\\/]/).pop() || path, path);
@@ -157,17 +232,46 @@ function App() {
         docDir: path ? path.replace(/[\\/][^\\/]*$/, '') : ''
       });
       if (found) {
-        const stem = (path.split(/[\\/]/).pop() || '文書').replace(/\.(md|markdown)$/i, '');
+        const stem = stemOfPath(path);
         setCollabRole('既存ホストに参加');
         setShowCollab(true);
         await ensureCollabSession(stem, found.url);
       } else {
-        setSuggestedRoom((path.split(/[\\/]/).pop() || '文書').replace(/\.(md|markdown)$/i, ''));
+        setSuggestedRoom(stemOfPath(path));
       }
     } catch (e) {
       window.alert(String(e));
     }
-  }, [loadMarkdown, stopSession]);
+  }, [loadMarkdown, stopSession, ensureCollabSession]);
+
+  const handleOpen = useCallback(async () => {
+    const path = await open({ filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }] });
+    if (!path) return;
+    await openFileByPath(path);
+  }, [openFileByPath]);
+
+  // 起動引数の最新参照 (マウント時エフェクト用)
+  const openFileByPathRef = useRef(openFileByPath);
+  openFileByPathRef.current = openFileByPath;
+
+  // .md 関連付けのダブルクリック起動・2重起動時のファイル受け渡し
+  useEffect(() => {
+    let alive = true;
+    void invoke<string | null>('take_startup_file').then((p) => {
+      if (alive && p) void openFileByPathRef.current(p).catch((e) => window.alert(String(e)));
+    });
+    let unlisten: Promise<() => void> | undefined;
+    void import('@tauri-apps/api/event').then(({ listen }) => {
+      if (!alive) return;
+      unlisten = listen<string>('open-file', (e) => {
+        void openFileByPathRef.current(e.payload).catch((err) => window.alert(String(err)));
+      });
+    });
+    return () => {
+      alive = false;
+      unlisten?.then((f) => f());
+    };
+  }, []);
 
   const handleExportHtml = useCallback(async () => {
     const view = viewRef.current;
@@ -264,6 +368,8 @@ function App() {
           roomName={collabRoom}
           suggestedRoom={suggestedRoom}
           positionLabel={collabRole ?? undefined}
+          webrtcPeerCount={webrtcPeerCount ?? undefined}
+          syncLabel={collabActive ? `同期: ${(syncedFlag || relaySynced) ? '済み' : (syncedFlag == null && relaySynced == null) ? '確認中' : '未同期'} / 中継: ${relayStatus ?? '不明'}${relaySynced != null ? (relaySynced ? '(同期済み)' : '(未同期)') : ''}${relayStats ? ` / 中継転送: 受信${relayStats.rx}/送信${relayStats.tx}/接続${relayStats.subs}` : ''} / 文書更新 ${ydocUpdates}回${lastSyncAt ? ` / 最終 ${lastSyncAt}` : ''}` : undefined}
           peers={peers}
           onStart={(opts) => void handleCollabStart(opts)}
           onStop={handleCollabStop}

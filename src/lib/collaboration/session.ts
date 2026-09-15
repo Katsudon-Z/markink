@@ -1,5 +1,6 @@
 import * as Y from 'yjs';
 import { WebrtcProvider } from 'y-webrtc';
+import { WebsocketProvider as YRelayProvider } from 'y-websocket';
 import { Awareness } from 'y-protocols/awareness';
 
 // requirements.md:110-114
@@ -13,6 +14,7 @@ export interface CollabSession {
   fragment: Y.XmlFragment;
   awareness: Awareness;
   provider: WebrtcProvider;
+  relay: YRelayProvider | null;
   roomName: string;
 }
 
@@ -38,16 +40,38 @@ export function startCollabSession(opts: StartCollabOptions): CollabSession {
     peerOpts: { config: { iceServers: [] } }
   });
 
+  // TCP 中継フォールバック: P2P が不通でもホスト経由で同期を保証する。
+  // 同じ Y.Doc を共有するため二重配送でも CRDT で収束する。
+  let relay: YRelayProvider | null = null;
+  try {
+    const base = opts.signalingUrl.replace(/\/$/, '');
+    relay = new YRelayProvider(
+      base,
+      encodeURIComponent(opts.roomName),
+      doc,
+      { awareness, disableBc: true }
+    );
+  } catch (e) {
+    console.warn('relay provider init failed', e);
+  }
+
   return {
     doc,
     fragment: doc.get(PROSEMIRROR_FRAGMENT_KEY, Y.XmlFragment) as Y.XmlFragment,
     awareness,
     provider,
+    relay,
     roomName: opts.roomName
   };
 }
 
 export function stopCollabSession(session: CollabSession): void {
+  try {
+    session.relay?.disconnect();
+    session.relay?.destroy();
+  } catch {
+    /* ignore */
+  }
   try {
     session.provider.destroy();
   } finally {
@@ -64,6 +88,14 @@ export interface PeerInfo {
   clientID: number;
   name: string;
   color: string;
+}
+
+// 文書名からルーム名を一意に決定 (全端末で一致させるため必須)
+// PC間でルーム名がずれると接続自体が成立しない
+export function stemOfPath(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path;
+  const stem = base.replace(/\.(md|markdown)$/i, '');
+  return stem === '' ? base : stem;
 }
 
 // 参加者一覧の取得 (自分を除く)

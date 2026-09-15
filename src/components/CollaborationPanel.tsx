@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import './CollaborationPanel.css';
 
 interface CollabPanelProps {
@@ -7,14 +7,27 @@ interface CollabPanelProps {
   suggestedRoom?: string;
   positionLabel?: string;
   peers?: { clientID: number; name: string; color: string }[];
+  webrtcPeerCount?: number;
+  syncLabel?: string;
   onStart: (opts: { roomName: string; signalingUrl: string | null }) => void;
   onStop: () => void;
 }
 
-export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomName, suggestedRoom, positionLabel, peers, onStart, onStop }) => {
-  const [roomInput, setRoomInput] = useState(suggestedRoom ?? 'MDNotepad-room');
+const DEFAULT_ROOM = 'MDNotepad-room';
+
+export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomName, suggestedRoom, positionLabel, peers, webrtcPeerCount, syncLabel, onStart, onStop }) => {
+  const [roomInput, setRoomInput] = useState(suggestedRoom ?? DEFAULT_ROOM);
+  const [roomLocked, setRoomLocked] = useState(suggestedRoom != null);
   const [signalingUrl, setSignalingUrl] = useState('');
   const [auto, setAuto] = useState(true);
+
+  // 文書を開いたら、その文書名をルーム名に統一 (全端末で一致させるため)
+  useEffect(() => {
+    if (suggestedRoom) {
+      setRoomInput(suggestedRoom);
+      setRoomLocked(true);
+    }
+  }, [suggestedRoom]);
 
   return (
     <div className="collab-panel">
@@ -23,6 +36,10 @@ export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomNam
         <div className="collab-controls">
           <p>セッション中: {roomName ?? '(ルームなし)'}</p>
           {positionLabel && <p className="collab-status">{positionLabel}</p>}
+          {webrtcPeerCount != null && (
+            <p className="collab-status">P2P 接続中: {webrtcPeerCount}台(自身を含む)</p>
+          )}
+          {syncLabel && <p className="collab-status">{syncLabel}</p>}
           {peers && peers.length > 0 && (
             <div className="collab-peers">
               <p>接続中の参加者 ({peers.length}人):</p>
@@ -41,14 +58,24 @@ export const CollaborationPanel: React.FC<CollabPanelProps> = ({ active, roomNam
       ) : (
         <div className="collab-controls">
           <div className="form-group">
-            <label htmlFor="collab-room">ルーム名 (文書ごとに共通の名前)</label>
+            <label htmlFor="collab-room">ルーム名 (文書名と一致させます)</label>
             <input
               id="collab-room"
               type="text"
               value={roomInput}
+              disabled={roomLocked}
               onChange={(e) => setRoomInput(e.target.value)}
               placeholder="例: 議事録-2026-09-14"
             />
+            {roomLocked && (
+              <button
+                className="btn-link"
+                onClick={() => setRoomLocked(false)}
+                title="別のルーム名を手入力する場合に有効化します"
+              >
+                別のルーム名を使う
+              </button>
+            )}
           </div>
           <label className="collab-auto">
             <input

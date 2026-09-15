@@ -16,7 +16,9 @@ use tokio::net::TcpListener as AsyncTcpListener;
 use tokio::sync::mpsc;
 
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use futures_util::{SinkExt, StreamExt};
+use crate::collab_relay;
 
 pub const SIGNAL_PORT: u16 = 42100;
 const MARKER_DIR: &str = ".mdnotepad";
@@ -180,7 +182,17 @@ async fn run_signaling(listener: AsyncTcpListener, mut stop_rx: mpsc::UnboundedR
 }
 
 async fn handle_client(stream: tokio::net::TcpStream, registry: Registry, client_id: u64) -> Result<(), String> {
-    let ws = tokio_tungstenite::accept_async(stream).await.map_err(|e| e.to_string())?;
+    // パスで用途を振り分け: "/" は y-webrtc シグナリング、"/<room>" は Yjs 中継
+    let mut raw_path = String::new();
+    let ws = tokio_tungstenite::accept_hdr_async(stream, |req: &Request, resp: Response| {
+        raw_path = req.uri().path().to_string();
+        Ok(resp)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if let Some(room_name) = collab_relay::relay_route(&raw_path) {
+        return handle_relay_client(ws, room_name, client_id).await;
+    }
     let (mut sink, mut source) = ws.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     {
@@ -205,6 +217,54 @@ async fn handle_client(stream: tokio::net::TcpStream, registry: Registry, client
     }
 
     registry.lock().unwrap().remove(&client_id);
+    writer.abort();
+    Ok(())
+}
+
+/// Yjs 中継クライアント (y-websocket 互換バイナリ)
+async fn handle_relay_client(
+    ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    room_name: String,
+    client_id: u64,
+) -> Result<(), String> {
+    let (mut sink, mut source) = ws.split();
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    collab_relay::relay_subscribe(&room_name, client_id, tx);
+
+    let writer = tauri::async_runtime::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if sink.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    while let Some(msg) = source.next().await {
+        match msg {
+            Ok(Message::Binary(data)) => {
+                let (replies, others) = collab_relay::relay_handle(&room_name, client_id, &data);
+                // 応答は送信者へ
+                if let Some(own) = collab_relay::relay_own_tx(&room_name, client_id) {
+                    for reply in replies {
+                        let _ = own.send(Message::Binary(reply.into()));
+                    }
+                }
+                // 他者へ素通し転送
+                let payload = Message::Binary(data);
+                let mut forwarded: u64 = 0;
+                for other in &others {
+                    if other.send(payload.clone()).is_ok() {
+                        forwarded += 1;
+                    }
+                }
+                collab_relay::relay_count_forwarded(&room_name, forwarded);
+            }
+            Ok(Message::Close(_)) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    collab_relay::relay_unsubscribe(client_id);
     writer.abort();
     Ok(())
 }
@@ -369,5 +429,46 @@ mod tests {
         let json = serde_json::to_string(&marker).unwrap();
         let parsed: HostMarker = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.port, 42100);
+    }
+
+    #[tokio::test]
+    async fn probe_returns_client_url_when_marker_points_to_live_host() {
+        let dir = std::env::temp_dir().join("mdn-probe-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // ダミーの生きたホスト (TCP だけ受け付ける)
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for _ in 0..4 {
+                if let Ok((stream, _)) = listener.accept() {
+                    // probe 用の接続を受けて即閉じる
+                    drop(stream);
+                }
+            }
+        });
+        let marker_dir = dir.join(".mdnotepad");
+        std::fs::create_dir_all(&marker_dir).unwrap();
+        std::fs::write(
+            marker_dir.join("signaling.json"),
+            serde_json::to_string(&HostMarker { ip: "127.0.0.1".into(), port, room: "doc".into() }).unwrap(),
+        )
+        .unwrap();
+
+        let found = probe_signal(&dir).await.expect("生きたホストは検出される");
+        assert_eq!(found.role, "client");
+        assert_eq!(found.url, format!("ws://127.0.0.1:{}", port));
+
+        // 死んだマーカーは検出されない
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&marker_dir).unwrap();
+        std::fs::write(
+            marker_dir.join("signaling.json"),
+            serde_json::to_string(&HostMarker { ip: "127.0.0.1".into(), port: 1, room: "doc".into() }).unwrap(),
+        )
+        .unwrap();
+        assert!(probe_signal(&dir).await.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
