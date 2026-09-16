@@ -23,6 +23,12 @@
   white-space: pre-wrap;
 }
 
+/* 画面外のブロックはレイアウト/描画をスキップする (長文での入力・スクロールを軽くする) */
+.editor .ProseMirror > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2.6em;
+}
+
 /* 空文書ガイド (requirements.md:32) */
 .mdn-placeholder {
   color: #999;

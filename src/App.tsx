@@ -5,7 +5,7 @@ import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
 import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
-import { stemOfPath } from './lib/collaboration/session';
+import { stem as stemOfPath } from './lib/path';
 import { ipc } from './lib/ipc';
 import { useAutosave } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
@@ -157,10 +157,11 @@ function App() {
           }}
           onStop={() => {
             const view = viewRef.current;
-            const markdown = collab.stopAndExtractMarkdown();
-            if (view && markdown != null) {
-              view.updateState(createEditorState(markdown));
-            }
+            void collab.stopAndExtractMarkdown().then((markdown) => {
+              if (view && markdown != null) {
+                view.updateState(createEditorState(markdown));
+              }
+            });
           }}
         />
       )}

@@ -6,7 +6,6 @@ import { createBasePlugins } from './plugins';
 
 export { undo, redo } from 'prosemirror-history';
 export { schema, markdownParser, markdownSerializer };
-export { createCollabEditorState, createCollabPlugins, seedFragmentFromProseMirror, fragmentToMarkdown } from './collab';
 export { applyFormat, getFormat, FORMATS, type FormatSpec, type FormatPayload } from './commands';
 
 export function createEditorState(initialMarkdown?: string) {

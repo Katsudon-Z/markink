@@ -4,6 +4,22 @@ import { markdownSerializer } from '../lib/prosemirror/editor';
 import { ipc } from '../lib/ipc';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
+/** 直列化をアイドル時間まで待つ上限 (これを過ぎたら実行する) */
+const SERIALIZE_IDLE_TIMEOUT_MS = 2000;
+
+interface IdleTask {
+  cancel(): void;
+}
+
+/** 入力の合間 (アイドル時間) に実行する。requestIdleCallback 非対応環境では即時実行 */
+function requestIdleTask(run: () => void, timeoutMs: number): IdleTask {
+  if (typeof window.requestIdleCallback === 'function') {
+    const handle = window.requestIdleCallback(run, { timeout: timeoutMs });
+    return { cancel: () => window.cancelIdleCallback(handle) };
+  }
+  const timer = window.setTimeout(run, 0);
+  return { cancel: () => window.clearTimeout(timer) };
+}
 
 export function serializeView(view: EditorView | null): string | null {
   if (!view) return null;
@@ -24,22 +40,37 @@ export function useAutosave({ getView, onSaved }: UseAutosaveOptions) {
   const [restoreCandidate, setRestoreCandidate] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirty = useRef(false);
+  const idle = useRef<IdleTask | null>(null);
+
+  /** 直列化と書き込み (重い処理なのでアイドル時間に呼ぶ) */
+  const write = useCallback(() => {
+    const content = serializeView(getView());
+    if (content == null) return;
+    dirty.current = false;
+    void ipc.autosave(content).then(() => onSaved?.()).catch(() => {});
+  }, [getView, onSaved]);
+
+  const cancelIdle = useCallback(() => {
+    idle.current?.cancel();
+    idle.current = null;
+  }, []);
 
   const flush = useCallback(() => {
     if (!dirty.current) return;
     const view = getView();
     if (view?.composing) {
       // IME 変換中にシリアライズでメインスレッドを止めない
-      // (日本語入力の遅延・変換候補ウィンドウの位置ずれ対策)
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(flush, AUTOSAVE_DEBOUNCE_MS);
       return;
     }
-    const content = serializeView(view);
-    if (content == null) return;
-    dirty.current = false;
-    void ipc.autosave(content).then(() => onSaved?.()).catch(() => {});
-  }, [getView, onSaved]);
+    if (idle.current) return; // 予約済みのアイドル処理で保存される
+    // 入力を妨げないよう、直列化はアイドル時間まで待つ (要件: 100ms 以内の反応)
+    idle.current = requestIdleTask(() => {
+      idle.current = null;
+      if (dirty.current) write();
+    }, SERIALIZE_IDLE_TIMEOUT_MS);
+  }, [getView, write]);
 
   /** 変更を検知してデバウンス保存を予約する */
   const markDirty = useCallback(() => {
@@ -54,8 +85,9 @@ export function useAutosave({ getView, onSaved }: UseAutosaveOptions) {
       clearTimeout(timer.current);
       timer.current = null;
     }
-    flush();
-  }, [flush]);
+    cancelIdle();
+    if (dirty.current) write();
+  }, [cancelIdle, write]);
 
   /** 起動時の復元候補を読み込む */
   const loadRestoreCandidate = useCallback(async () => {
@@ -76,8 +108,9 @@ export function useAutosave({ getView, onSaved }: UseAutosaveOptions) {
       clearTimeout(timer.current);
       timer.current = null;
     }
+    cancelIdle();
     void ipc.deleteAutosave().catch(() => {});
-  }, []);
+  }, [cancelIdle]);
 
   return {
     restoreCandidate,

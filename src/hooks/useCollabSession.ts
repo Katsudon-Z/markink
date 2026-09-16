@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorView } from 'prosemirror-view';
-import {
-  startCollabSession,
-  stopCollabSession,
-  listPeers,
-  type CollabSession,
-  type PeerInfo
-} from '../lib/collaboration/session';
-import { createCollabEditorState, seedFragmentFromProseMirror, fragmentToMarkdown } from '../lib/prosemirror/collab';
+import type { CollabSession, PeerInfo } from '../lib/collaboration/session';
+import { loadCollabModules, type CollabModules } from '../lib/collaboration/load';
 import { ipc, type RelayStats } from '../lib/ipc';
 
 const DIAGNOSTICS_INTERVAL_MS = 2000;
@@ -80,6 +74,8 @@ export function useCollabSession({
   const [showCursors, setShowCursorsState] = useState(true);
 
   const sessionRef = useRef<CollabSession | null>(null);
+  // 共同編集ライブラリは初回のセッション開始時に読み込む
+  const modulesRef = useRef<CollabModules | null>(null);
   const updateCountRef = useRef(0);
   const lastUpdateTimeRef = useRef<string | null>(null);
   const relayStatusRef = useRef<string | null>(null);
@@ -98,8 +94,9 @@ export function useCollabSession({
       showCursorsRef.current = next;
       const session = sessionRef.current;
       const view = getView();
-      if (session && view) {
-        view.updateState(createCollabEditorState(session, view.state.doc, { showCursors: next }));
+      const collab = modulesRef.current?.collab;
+      if (session && view && collab) {
+        view.updateState(collab.createCollabEditorState(session, view.state.doc, { showCursors: next }));
       }
     },
     [getView]
@@ -110,7 +107,7 @@ export function useCollabSession({
     if (!session) return null;
     sessionRef.current = null;
     void ipc.releaseSignal().catch(() => {});
-    stopCollabSession(session);
+    modulesRef.current?.session.stopCollabSession(session);
     updateCountRef.current = 0;
     lastUpdateTimeRef.current = null;
     relayStatusRef.current = null;
@@ -130,6 +127,8 @@ export function useCollabSession({
       const view = getView();
       if (!view || sessionRef.current) return false;
 
+      const modules = modulesRef.current ?? (modulesRef.current = await loadCollabModules());
+
       let url = signalingUrl;
       let label: string | null = null;
       let shouldSeed = seedIfHost;
@@ -140,10 +139,11 @@ export function useCollabSession({
         if (seedIfHost) shouldSeed = info.role === 'host';
       }
 
-      const session = startCollabSession({ roomName: room, signalingUrl: url });
+      const session = modules.session.startCollabSession({ roomName: room, signalingUrl: url });
       sessionRef.current = session;
 
-      const updatePeers = () => setPeers(listPeers(session.awareness, session.doc.clientID));
+      const updatePeers = () =>
+        setPeers(modules.session.listPeers(session.awareness, session.doc.clientID));
       updatePeers();
       session.awareness.on('change', updatePeers);
 
@@ -171,9 +171,13 @@ export function useCollabSession({
 
       if (shouldSeed) {
         // ホスト(ルームの最初の参加者)が現行の内容を共有
-        seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
+        modules.collab.seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
       }
-      view.updateState(createCollabEditorState(session, view.state.doc, { showCursors: showCursorsRef.current }));
+      view.updateState(
+        modules.collab.createCollabEditorState(session, view.state.doc, {
+          showCursors: showCursorsRef.current
+        })
+      );
 
       setActive(true);
       setRoomName(room);
@@ -235,10 +239,10 @@ export function useCollabSession({
   }, [active]);
 
   /** セッションを終了し、Yjs 上の内容を Markdown として返す */
-  const stopAndExtractMarkdown = useCallback((): string | null => {
+  const stopAndExtractMarkdown = useCallback(async (): Promise<string | null> => {
     const session = sessionRef.current;
     if (!session) return null;
-    const markdown = fragmentToMarkdown(session.fragment);
+    const markdown = modulesRef.current?.collab.fragmentToMarkdown(session.fragment) ?? null;
     stop();
     return markdown;
   }, [stop]);

@@ -32,3 +32,9 @@ local-ip-address = "0.6.13"
 tauri-plugin-single-instance = "2.4.4"
 yrs = { version = "0.27.4", features = ["sync"] }
 urlencoding = "2.1.3"
+
+# 起動時間と配布サイズの改善 (軽量 LTO + 単一コード生成単位 + デバッグ情報削除)
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

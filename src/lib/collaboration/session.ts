@@ -92,11 +92,7 @@ export interface PeerInfo {
 
 // 文書名からルーム名を一意に決定 (全端末で一致させるため必須)
 // PC間でルーム名がずれると接続自体が成立しない
-export function stemOfPath(path: string): string {
-  const base = path.split(/[\\/]/).pop() ?? path;
-  const stem = base.replace(/\.(md|markdown)$/i, '');
-  return stem === '' ? base : stem;
-}
+export { stem as stemOfPath } from '../path';
 
 // 参加者一覧の取得 (自分を除く)
 export function listPeers(awareness: Awareness, selfClientID: number): PeerInfo[] {
