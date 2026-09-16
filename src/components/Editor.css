@@ -29,6 +29,11 @@
   contain-intrinsic-size: auto 2.6em;
 }
 
+/* 相手カーソルの名前ラベルは段落の外側に描画されるため、スキップ対象から外す (ラベルが切れないように) */
+.editor .ProseMirror > *:has(.mdn-collab-cursor) {
+  content-visibility: visible;
+}
+
 /* 空文書ガイド (requirements.md:32) */
 .mdn-placeholder {
   color: #999;
