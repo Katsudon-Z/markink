@@ -5,7 +5,7 @@ import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
 import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
-import { stem as stemOfPath } from './lib/path';
+import { baseName, dirName, stem as stemOfPath } from './lib/path';
 import { ipc } from './lib/ipc';
 import { useAutosave } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
@@ -23,10 +23,36 @@ function App() {
   // React.memo を維持するため prop の同一性を保つ
   const getDocDir = useCallback(() => dirRef.current, []);
 
-  const autosave = useAutosave({ getView });
+  // 共同編集セッションの参照 (自動保存でルーム名を記録するため先に用意)
+  const collabRef = useRef<ReturnType<typeof useCollabSession> | null>(null);
+  const suggestedRoomRef = useRef<string | null>(null);
+  suggestedRoomRef.current = suggestedRoom ?? null;
+  // 保存するルーム名: 進行中のセッション → 開いている文書から決まる候補
+  const getRoomName = useCallback(
+    () => collabRef.current?.roomName || suggestedRoomRef.current,
+    []
+  );
+  const getDocPath = useCallback(() => pathRef.current, []);
+
+  // 文書のフォルダでシグナリングサーバを探し、あれば自動参加・なければルーム名を提案する
+  const joinOrSuggest = useCallback(
+    async (path: string, dir: string, preferredRoom?: string | null) => {
+      const room = preferredRoom || stemOfPath(path);
+      const found = await ipc.probeSignal(dir);
+      if (found) {
+        setShowCollab(true);
+        await collabRef.current?.ensure(room, found.url, false);
+        collabRef.current?.setRoleLabel('既存ホストに参加');
+      } else {
+        setSuggestedRoom(room);
+      }
+    },
+    []
+  );
+
+  const autosave = useAutosave({ getView, getRoomName, getDocPath });
 
   // 共同編集 (セッションのライフサイクルと診断表示)
-  const collabRef = useRef<ReturnType<typeof useCollabSession> | null>(null);
   const collab = useCollabSession({
     getView,
     getDocDir,
@@ -41,17 +67,7 @@ function App() {
     dirRef,
     pathRef,
     onBeforeOpen: () => collabRef.current?.stop(),
-    onAfterOpen: async (path, dir) => {
-      // 既存シグナリングサーバがあれば自動参加 (requirements.md:113)
-      const found = await ipc.probeSignal(dir);
-      if (found) {
-        setShowCollab(true);
-        await collabRef.current?.ensure(stemOfPath(path), found.url, false);
-        collabRef.current?.setRoleLabel('既存ホストに参加');
-      } else {
-        setSuggestedRoom(stemOfPath(path));
-      }
-    }
+    onAfterOpen: (path, dir) => joinOrSuggest(path, dir)
   });
   docRef.current = doc;
 
@@ -95,15 +111,33 @@ function App() {
               前回、アプリが異常終了した際に編集中の内容が自動保存されています。
               復元しますか?
             </p>
-            <pre className="restore-preview">{autosave.restoreCandidate.slice(0, 400)}</pre>
+            <pre className="restore-preview">{autosave.restoreCandidate.content.slice(0, 400)}</pre>
+            {autosave.restoreCandidate.room && (
+              <p className="restore-message">
+                共同編集のルーム「{autosave.restoreCandidate.room}」も復元します。
+              </p>
+            )}
             <div className="restore-actions">
               <button
                 className="btn btn-primary"
                 onClick={() => {
-                  const content = autosave.restoreCandidate;
-                  if (content != null) doc.loadMarkdown(content, '復元した文書', null);
+                  const data = autosave.restoreCandidate;
+                  if (!data) return;
                   autosave.clearRestoreCandidate();
                   autosave.discardServerAutosave();
+                  void (async () => {
+                    if (data.path) {
+                      // 元のファイルとして復元し、共同編集のフォルダ情報も引き継ぐ
+                      doc.loadMarkdown(data.content, baseName(data.path), data.path);
+                      await joinOrSuggest(data.path, dirName(data.path) ?? '', data.room);
+                      return;
+                    }
+                    doc.loadMarkdown(data.content, '復元した文書', null);
+                    if (data.room) {
+                      setSuggestedRoom(data.room);
+                      setShowCollab(true);
+                    }
+                  })();
                 }}
               >
                 復元する

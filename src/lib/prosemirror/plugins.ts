@@ -5,6 +5,7 @@ import { splitListItem } from 'prosemirror-schema-list';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { history, undo, redo } from 'prosemirror-history';
+import { tableEditing } from 'prosemirror-tables';
 import { yUndoPlugin, undoCommand as yUndo, redoCommand as yRedo } from 'y-prosemirror';
 import { schema } from './schema';
 import { placeholderPlugin } from './image';
@@ -50,6 +51,8 @@ export function createBasePlugins({ historyMode }: BasePluginOptions): Plugin[] 
 
   return [
     ...historyPlugins,
+    // 表のセル移動 (Tab/Shift-Tab) などは keymap より先に評価する
+    tableEditing(),
     keymap(historyKeys),
     // Enter/Shift+Enter は baseKeymap より先に評価する
     keymap({

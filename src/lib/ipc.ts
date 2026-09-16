@@ -13,6 +13,13 @@ export interface RelayStats {
   subs: number;
 }
 
+/** 自動保存データ (本文 + 共同編集のルーム名 + 文書パス) */
+export interface AutosaveData {
+  content: string;
+  room: string | null;
+  path: string | null;
+}
+
 export const ipc = {
   readMarkdown: (path: string) => invoke<string>('read_markdown', { path }),
   writeMarkdown: (path: string, content: string) => invoke<void>('write_markdown', { path, content }),
@@ -21,8 +28,9 @@ export const ipc = {
   writeAsset: (docDir: string, fileName: string, bytes: number[]) =>
     invoke<string>('write_asset', { docDir, fileName, bytes }),
 
-  autosave: (content: string) => invoke<void>('autosave', { content }),
-  readAutosave: () => invoke<string | null>('read_autosave'),
+  autosave: (content: string, room: string | null, path: string | null) =>
+    invoke<void>('autosave', { content, room, path }),
+  readAutosave: () => invoke<AutosaveData | null>('read_autosave'),
   deleteAutosave: () => invoke<void>('delete_autosave'),
 
   resolveSignal: (docDir: string, room: string) =>

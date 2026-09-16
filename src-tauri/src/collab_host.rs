@@ -24,12 +24,15 @@ pub const SIGNAL_PORT: u16 = 42100;
 const MARKER_DIR: &str = ".mdnotepad";
 const MARKER_FILE: &str = "signaling.json";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HostMarker {
     pub ip: String,
     pub port: u16,
     #[serde(default)]
     pub room: String,
+    /// 同時起動の競合解決用トークン (マーカーを最後に書いた側を勝者にする)
+    #[serde(default)]
+    pub token: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,6 +66,25 @@ fn probe_host(ip: &str, port: u16) -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok()
 }
 
+fn read_marker(path: &Path) -> Option<HostMarker> {
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<HostMarker>(&content).ok()
+}
+
+fn write_marker(path: &Path, marker: &HostMarker) -> Result<(), String> {
+    std::fs::write(path, serde_json::to_string(marker).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+/// 別プロセス・別端末と衝突しない一意なトークン
+fn new_token() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}-{}", std::process::id(), nanos)
+}
+
 /// LAN 上での自 IP 取得: インターフェース列挙から非ループバック IPv4 を選択
 fn local_lan_ip() -> Option<String> {
     match local_ip_address::local_ip() {
@@ -91,36 +113,57 @@ pub async fn resolve_signal(doc_dir: &Path, room: &str) -> Result<SignalInfo, St
     let marker_path = marker_path_for(doc_dir)?;
 
     // 1. 既存マーカー: 生きたホストなら参加
-    if let Ok(content) = std::fs::read_to_string(&marker_path) {
-        if let Ok(marker) = serde_json::from_str::<HostMarker>(&content) {
-            if probe_host(&marker.ip, marker.port) {
-                return Ok(SignalInfo {
-                    role: "client".into(),
-                    url: format!("ws://{}:{}", marker.ip, marker.port),
-                });
-            }
-            // 死んだホスト → 再選出
-            let _ = std::fs::remove_file(&marker_path);
+    if let Some(marker) = read_marker(&marker_path) {
+        if probe_host(&marker.ip, marker.port) {
+            return Ok(SignalInfo {
+                role: "client".into(),
+                url: format!("ws://{}:{}", marker.ip, marker.port),
+            });
+        }
+        // 死んだホスト → 再選出
+        let _ = std::fs::remove_file(&marker_path);
+    }
+
+    // 2. 既知ポートの bind に勝った者がホスト (同一マシン内の仲裁)
+    let spawned = spawn_signaling_server(SIGNAL_PORT);
+    if spawned.is_err() {
+        return Ok(SignalInfo {
+            role: "client".into(),
+            url: format!("ws://127.0.0.1:{}", SIGNAL_PORT),
+        });
+    }
+
+    // 3. マーカーを公開する。別端末が同時に起動した場合は bind が互いに成功して
+    //    しまうため、書き込みが交差したときは最後に書いた側を勝者にする。
+    let ip = local_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+    let url = format!("ws://{}:{}", ip, SIGNAL_PORT);
+    let token = new_token();
+    write_marker(
+        &marker_path,
+        &HostMarker { ip: ip.clone(), port: SIGNAL_PORT, room: room.to_string(), token: token.clone() },
+    )?;
+
+    // 書き込みが反映されるのを待って再確認 (相手のマーカーが生きていれば降格)
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    match read_marker(&marker_path) {
+        Some(marker) if marker.token == token => {}
+        Some(marker) if probe_host(&marker.ip, marker.port) => {
+            release_server();
+            return Ok(SignalInfo {
+                role: "client".into(),
+                url: format!("ws://{}:{}", marker.ip, marker.port),
+            });
+        }
+        _ => {
+            // 相手のマーカーが死んでいる/消えている → 自分の情報を書き直してホスト継続
+            write_marker(
+                &marker_path,
+                &HostMarker { ip, port: SIGNAL_PORT, room: room.to_string(), token },
+            )?;
         }
     }
 
-    // 2. 既知ポートの bind に勝った者がホスト
-    let spawned = spawn_signaling_server(SIGNAL_PORT);
-    if spawned.is_ok() {
-        let ip = local_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string());
-        let marker = HostMarker { ip: ip.clone(), port: SIGNAL_PORT, room: room.to_string() };
-        std::fs::write(&marker_path, serde_json::to_string(&marker).unwrap())
-            .map_err(|e| e.to_string())?;
-        return Ok(SignalInfo {
-            role: "host".into(),
-            url: format!("ws://{}:{}", ip, SIGNAL_PORT),
-        });
-    }
-    // bind 失敗 → 同一マシンの別インスタンスがホスト
-    Ok(SignalInfo {
-        role: "client".into(),
-        url: format!("ws://127.0.0.1:{}", SIGNAL_PORT),
-    })
+    Ok(SignalInfo { role: "host".into(), url })
 }
 
 /// セッション終了: ホストなら停止してマーカーを消す
@@ -425,10 +468,11 @@ mod tests {
 
     #[tokio::test]
     async fn marker_write_parse_roundtrip() {
-        let marker = HostMarker { ip: "10.1.2.3".into(), port: 42100, room: "r".into() };
+        let marker = HostMarker { ip: "10.1.2.3".into(), port: 42100, room: "r".into(), ..Default::default() };
         let json = serde_json::to_string(&marker).unwrap();
         let parsed: HostMarker = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.port, 42100);
+        assert!(parsed.token.is_empty());
     }
 
     #[tokio::test]
@@ -452,7 +496,7 @@ mod tests {
         std::fs::create_dir_all(&marker_dir).unwrap();
         std::fs::write(
             marker_dir.join("signaling.json"),
-            serde_json::to_string(&HostMarker { ip: "127.0.0.1".into(), port, room: "doc".into() }).unwrap(),
+            serde_json::to_string(&HostMarker { ip: "127.0.0.1".into(), port, room: "doc".into(), ..Default::default() }).unwrap(),
         )
         .unwrap();
 
@@ -465,7 +509,7 @@ mod tests {
         std::fs::create_dir_all(&marker_dir).unwrap();
         std::fs::write(
             marker_dir.join("signaling.json"),
-            serde_json::to_string(&HostMarker { ip: "127.0.0.1".into(), port: 1, room: "doc".into() }).unwrap(),
+            serde_json::to_string(&HostMarker { ip: "127.0.0.1".into(), port: 1, room: "doc".into(), ..Default::default() }).unwrap(),
         )
         .unwrap();
         assert!(probe_signal(&dir).await.is_none());

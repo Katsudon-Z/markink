@@ -34,6 +34,43 @@
   content-visibility: visible;
 }
 
+/* 表は行数分の高さがあるため、オフスクリーン時の見積りを大きめにする */
+.editor .ProseMirror > table {
+  contain-intrinsic-size: auto 8em;
+}
+
+/* 表 (要件: 表の追加・修正) */
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid #ccc;
+  padding: 4px 8px;
+  vertical-align: top;
+  position: relative;
+  min-width: 3em;
+}
+
+.ProseMirror th {
+  background: #f5f5f5;
+  font-weight: bold;
+}
+
+/* 選択中のセル (prosemirror-tables) */
+.ProseMirror .selectedCell:after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  content: '';
+  background: rgba(90, 140, 220, 0.18);
+  pointer-events: none;
+}
+
 /* 空文書ガイド (requirements.md:32) */
 .mdn-placeholder {
   color: #999;

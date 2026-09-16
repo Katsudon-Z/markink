@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { EditorView } from 'prosemirror-view';
 import { markdownSerializer } from '../lib/prosemirror/editor';
-import { ipc } from '../lib/ipc';
+import { ipc, type AutosaveData } from '../lib/ipc';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 /** 直列化をアイドル時間まで待つ上限 (これを過ぎたら実行する) */
@@ -28,6 +28,10 @@ export function serializeView(view: EditorView | null): string | null {
 
 interface UseAutosaveOptions {
   getView: () => EditorView | null;
+  /** 一緒に保存する共同編集のルーム名 (復元時に再利用する) */
+  getRoomName?: () => string | null;
+  /** 一緒に保存する文書パス (復元時に元のファイルとして開き直す) */
+  getDocPath?: () => string | null;
   /** 自動保存が実際に書き込まれたとき (最終保存時刻の表示などに利用) */
   onSaved?: () => void;
 }
@@ -36,18 +40,25 @@ interface UseAutosaveOptions {
  * 編集のたびにデバウンスして自動保存し、起動時に復元候補を提示する (requirements.md:48)
  * - 変更が無い場合はシリアライズも書き込みもしない (軽快さ優先)
  */
-export function useAutosave({ getView, onSaved }: UseAutosaveOptions) {
-  const [restoreCandidate, setRestoreCandidate] = useState<string | null>(null);
+export function useAutosave({ getView, getRoomName, getDocPath, onSaved }: UseAutosaveOptions) {
+  const [restoreCandidate, setRestoreCandidate] = useState<AutosaveData | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirty = useRef(false);
   const idle = useRef<IdleTask | null>(null);
+  const getRoomNameRef = useRef(getRoomName);
+  getRoomNameRef.current = getRoomName;
+  const getDocPathRef = useRef(getDocPath);
+  getDocPathRef.current = getDocPath;
 
   /** 直列化と書き込み (重い処理なのでアイドル時間に呼ぶ) */
   const write = useCallback(() => {
     const content = serializeView(getView());
     if (content == null) return;
     dirty.current = false;
-    void ipc.autosave(content).then(() => onSaved?.()).catch(() => {});
+    void ipc
+      .autosave(content, getRoomNameRef.current?.() ?? null, getDocPathRef.current?.() ?? null)
+      .then(() => onSaved?.())
+      .catch(() => {});
   }, [getView, onSaved]);
 
   const cancelIdle = useCallback(() => {
