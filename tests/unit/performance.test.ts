@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createEditorState, defaultMarkdownSerializer, defaultMarkdownParser } from '../../src/lib/prosemirror/editor';
+import { createEditorState, markdownSerializer, markdownParser } from '../../src/lib/prosemirror/editor';
 
 // requirements.md:45 5MB・約5万文字を目立つ遅延なく編集可能であること
 // 5MB はフォント依存なので、5万字相当の再現文書で変換パフォーマンスを検証
@@ -22,10 +22,10 @@ describe('5万文字文書パフォーマンス (requirements.md:45)', () => {
   it('パースとシリアライズが一括で 3秒以内に完了する', () => {
     const md = buildLargeMarkdown();
     const start = performance.now();
-    const parser = defaultMarkdownParser;
+    const parser = markdownParser;
     const doc = parser.parse(md);
     const state = createEditorState(md);
-    const serialized = defaultMarkdownSerializer.serialize(state.doc);
+    const serialized = markdownSerializer.serialize(state.doc);
     const elapsed = performance.now() - start;
 
     expect(doc).toBeTruthy();
@@ -38,3 +38,4 @@ describe('5万文字文書パフォーマンス (requirements.md:45)', () => {
     expect(md.length).toBeGreaterThanOrEqual(50000);
   });
 });
+

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DOMSerializer } from 'prosemirror-model';
-import { createEditorState, schema, defaultMarkdownSerializer } from '../../src/lib/prosemirror/editor';
+import { createEditorState, schema, markdownSerializer } from '../../src/lib/prosemirror/editor';
 import { documentToHtml } from '../../src/lib/markdown/htmlExport';
 
 // requirements.md:103 初期版の書き出し: HTML対応
@@ -17,7 +17,7 @@ describe('HTML エクスポートの基礎 (requirements.md:103)', () => {
 
   it('画像ノードも HTML に含まれる', () => {
     const state = createEditorState('![説明](assets/test.png)\n');
-    const md = defaultMarkdownSerializer.serialize(state.doc);
+    const md = markdownSerializer.serialize(state.doc);
     expect(md).toContain('assets/test.png');
   });
 

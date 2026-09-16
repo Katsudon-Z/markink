@@ -1,13 +1,13 @@
 import { useCallback, useRef, useState } from 'react';
 import { EditorView } from 'prosemirror-view';
-import { defaultMarkdownSerializer } from '../lib/prosemirror/editor';
+import { markdownSerializer } from '../lib/prosemirror/editor';
 import { ipc } from '../lib/ipc';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 
 export function serializeView(view: EditorView | null): string | null {
   if (!view) return null;
-  return defaultMarkdownSerializer.serialize(view.state.doc);
+  return markdownSerializer.serialize(view.state.doc);
 }
 
 interface UseAutosaveOptions {
@@ -27,7 +27,15 @@ export function useAutosave({ getView, onSaved }: UseAutosaveOptions) {
 
   const flush = useCallback(() => {
     if (!dirty.current) return;
-    const content = serializeView(getView());
+    const view = getView();
+    if (view?.composing) {
+      // IME 変換中にシリアライズでメインスレッドを止めない
+      // (日本語入力の遅延・変換候補ウィンドウの位置ずれ対策)
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(flush, AUTOSAVE_DEBOUNCE_MS);
+      return;
+    }
+    const content = serializeView(view);
     if (content == null) return;
     dirty.current = false;
     void ipc.autosave(content).then(() => onSaved?.()).catch(() => {});

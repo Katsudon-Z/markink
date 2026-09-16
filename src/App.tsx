@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorView } from 'prosemirror-view';
 import { Editor } from './components/Editor';
 import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
+import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
 import { stemOfPath } from './lib/collaboration/session';
 import { ipc } from './lib/ipc';
@@ -12,6 +13,7 @@ import { useDocumentActions, useStartupFile } from './hooks/useDocumentActions';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
+  const [showComments, setShowComments] = useState(false);
   const [suggestedRoom, setSuggestedRoom] = useState<string | undefined>(undefined);
 
   const viewRef = useRef<EditorView | null>(null);
@@ -27,8 +29,7 @@ function App() {
   const collabRef = useRef<ReturnType<typeof useCollabSession> | null>(null);
   const collab = useCollabSession({
     getView,
-    getDocDir: () => dirRef.current,
-    diagnosticsEnabled: showCollab,
+    getDocDir,
     onDocumentChanged: autosave.markDirty
   });
   collabRef.current = collab;
@@ -66,9 +67,23 @@ function App() {
     [autosave]
   );
 
-  const handleFormat = useCallback((format: string) => {
-    if (viewRef.current) applyFormat(viewRef.current, format);
+  const handleFormat = useCallback((format: string, payload?: { href?: string }) => {
+    if (viewRef.current) applyFormat(viewRef.current, format, payload);
   }, []);
+
+  const handleToggleComments = useCallback(() => setShowComments((v) => !v), []);
+
+  // ファイル名はウィンドウ枠 (タイトルバー) に表示する
+  useEffect(() => {
+    let cancelled = false;
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      if (cancelled) return;
+      getCurrentWindow().setTitle(`${doc.title} - MDNotepad`).catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc.title]);
 
   return (
     <div className="app">
@@ -108,7 +123,6 @@ function App() {
       )}
 
       <header className="app-header">
-        <h1 className="app-title">{doc.title}</h1>
         <div className="app-actions">
           <button className="btn" onClick={() => doc.newDocument(autosave.discardServerAutosave)}>
             新規作成
@@ -122,7 +136,11 @@ function App() {
         </div>
       </header>
 
-      <Toolbar onFormat={handleFormat} />
+      <Toolbar
+        onFormat={handleFormat}
+        showComments={showComments}
+        onToggleComments={handleToggleComments}
+      />
 
       {showCollab && (
         <CollaborationPanel
@@ -132,6 +150,8 @@ function App() {
           positionLabel={collab.roleLabel ?? undefined}
           peers={collab.peers}
           diagnostics={collab.diagnostics}
+          showCursors={collab.showCursors}
+          onShowCursorsChange={collab.setShowCursors}
           onStart={(opts) => {
             void collab.ensure(opts.roomName, opts.signalingUrl).catch((e) => window.alert(String(e)));
           }}
@@ -150,8 +170,16 @@ function App() {
           onReady={handleReady}
           onChange={autosave.markDirty}
           getDocDir={getDocDir}
+          showComments={showComments}
         />
       </main>
+
+      <StatusBar
+        path={doc.path}
+        collabActive={collab.active}
+        peersCount={collab.peers.length}
+        diagnostics={collab.diagnostics}
+      />
     </div>
   );
 }

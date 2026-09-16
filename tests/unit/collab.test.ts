@@ -3,7 +3,13 @@ import * as Y from 'yjs';
 import { EditorView } from 'prosemirror-view';
 import { Awareness } from 'y-protocols/awareness';
 import { createEditorState } from '../../src/lib/prosemirror/editor';
-import { createCollabEditorState, seedFragmentFromProseMirror, fragmentToMarkdown } from '../../src/lib/prosemirror/collab';
+import {
+  createCollabEditorState,
+  collabCursorBuilder,
+  seedFragmentFromProseMirror,
+  fragmentToMarkdown
+} from '../../src/lib/prosemirror/collab';
+import { yCursorPluginKey } from 'y-prosemirror';
 import { listPeers, randomColorForClientID, stemOfPath } from '../../src/lib/collaboration/session';
 
 describe('collab (y-prosemirror)', () => {
@@ -35,6 +41,34 @@ describe('collab (y-prosemirror)', () => {
     const peers = listPeers(awareness, ydoc.clientID);
     expect(peers.length).toBe(1);
     expect(peers[0].name).toBe('他参加A');
+  });
+
+  it('相手カーソルと名前ラベルをオーバーレイで生成する', () => {
+    const el = collabCursorBuilder({ name: '山田', color: '#e11d48' });
+    const label = el.querySelector('.mdn-collab-label') as HTMLElement | null;
+    expect(label?.textContent).toBe('山田');
+    expect(label?.style.backgroundColor).toBe('rgb(225, 29, 72)');
+    // ラベルは絶対配置 (本文レイアウトに影響しない)
+    expect(label?.className).toContain('mdn-collab-label');
+  });
+
+  it('showCursors の指定でカーソルプラグインを切替できる', () => {
+    const ydoc = new Y.Doc();
+    const fragment = ydoc.get('prosemirror', Y.XmlFragment) as Y.XmlFragment;
+    const awareness = new Awareness(ydoc);
+
+    const withCursors = createCollabEditorState({ fragment, awareness }, undefined, {
+      showCursors: true
+    });
+    expect(yCursorPluginKey.getState(withCursors)).toBeDefined();
+
+    const withoutCursors = createCollabEditorState({ fragment, awareness }, undefined, {
+      showCursors: false
+    });
+    expect(yCursorPluginKey.getState(withoutCursors)).toBeUndefined();
+
+    // カーソル有無以外の構成は同一
+    expect(withCursors.plugins.length).toBe(withoutCursors.plugins.length + 1);
   });
 
   it('clientIDから安定した色を返す', () => {

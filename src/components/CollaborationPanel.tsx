@@ -10,6 +10,8 @@ interface CollabPanelProps {
   positionLabel?: string;
   peers?: { clientID: number; name: string; color: string }[];
   diagnostics: CollabDiagnostics;
+  showCursors?: boolean;
+  onShowCursorsChange?: (next: boolean) => void;
   onStart: (opts: { roomName: string; signalingUrl: string | null }) => void;
   onStop: () => void;
 }
@@ -23,6 +25,8 @@ export const CollaborationPanel: React.FC<CollabPanelProps> = ({
   positionLabel,
   peers,
   diagnostics,
+  showCursors,
+  onShowCursorsChange,
   onStart,
   onStop
 }) => {
@@ -47,6 +51,16 @@ export const CollaborationPanel: React.FC<CollabPanelProps> = ({
           <p>セッション中: {roomName ?? '(ルームなし)'}</p>
           {positionLabel && <p className="collab-status">{positionLabel}</p>}
           <CollabStatus diagnostics={diagnostics} />
+          {onShowCursorsChange && (
+            <label className="collab-auto">
+              <input
+                type="checkbox"
+                checked={showCursors ?? false}
+                onChange={(e) => onShowCursorsChange(e.target.checked)}
+              />
+              相手のカーソル位置を表示する
+            </label>
+          )}
           {peers && peers.length > 0 && (
             <div className="collab-peers">
               <p>接続中の参加者 ({peers.length}人):</p>

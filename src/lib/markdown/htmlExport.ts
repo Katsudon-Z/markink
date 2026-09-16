@@ -20,6 +20,11 @@ export function documentToHtml(doc: PMNode, title: string): string {
   const fragment = DOMSerializer.fromSchema(schema).serializeFragment(doc.content);
   const body = document.createElement('div');
   body.appendChild(fragment);
+  // HTMLコメントは書き出し先では実際の HTML コメントとして出力する
+  body.querySelectorAll('span.mdn-html-comment').forEach((el) => {
+    const inner = (el.textContent ?? '').replace(/^<!--/, '').replace(/-->$/, '');
+    el.replaceWith(document.createComment(inner));
+  });
   return (
     `<!doctype html>\n<html lang="ja">\n<head>\n<meta charset="utf-8">\n` +
     `<title>${escapeHtml(title)}</title>\n<style>${HTML_STYLE}</style>\n</head>\n` +

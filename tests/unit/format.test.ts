@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { EditorState } from 'prosemirror-state';
 import { TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
-import { applyFormat, createEditorState, defaultMarkdownSerializer } from '../../src/lib/prosemirror/editor';
+import { applyFormat, createEditorState, markdownSerializer } from '../../src/lib/prosemirror/editor';
 
 function createView() {
   const el = document.createElement('div');
@@ -20,7 +20,7 @@ describe('applyFormat', () => {
     view.dispatch(tr);
     const sel = TextSelection.create(view.state.doc, 1, 4);
     view.dispatch(view.state.tr.setSelection(sel).addMark(1, 4, view.state.schema.marks.strong.create()));
-    expect(defaultMarkdownSerializer.serialize(view.state.doc)).toContain('**');
+    expect(markdownSerializer.serialize(view.state.doc)).toContain('**');
     view.destroy();
   });
 

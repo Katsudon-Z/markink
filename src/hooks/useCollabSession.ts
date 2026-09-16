@@ -63,8 +63,6 @@ export function formatSyncLabel(diag: CollabDiagnostics): string {
 interface UseCollabSessionOptions {
   getView: () => EditorView | null;
   getDocDir: () => string | null;
-  /** パネルが開いている間だけ診断ポーリングを行う (軽快さ優先) */
-  diagnosticsEnabled: boolean;
   /** Yjs 文書が変化したとき (自動保存の契機) */
   onDocumentChanged?: () => void;
 }
@@ -72,7 +70,6 @@ interface UseCollabSessionOptions {
 export function useCollabSession({
   getView,
   getDocDir,
-  diagnosticsEnabled,
   onDocumentChanged
 }: UseCollabSessionOptions) {
   const [active, setActive] = useState(false);
@@ -80,6 +77,7 @@ export function useCollabSession({
   const [roleLabel, setRoleLabel] = useState<string | null>(null);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [diagnostics, setDiagnostics] = useState<CollabDiagnostics>(EMPTY_DIAGNOSTICS);
+  const [showCursors, setShowCursorsState] = useState(true);
 
   const sessionRef = useRef<CollabSession | null>(null);
   const updateCountRef = useRef(0);
@@ -90,6 +88,22 @@ export function useCollabSession({
 
   const onDocumentChangedRef = useRef(onDocumentChanged);
   onDocumentChangedRef.current = onDocumentChanged;
+  const showCursorsRef = useRef(showCursors);
+  showCursorsRef.current = showCursors;
+
+  /** 相手カーソル表示の切替 (エディタ状態を再構築。Yjs 文書は保持される) */
+  const setShowCursors = useCallback(
+    (next: boolean) => {
+      setShowCursorsState(next);
+      showCursorsRef.current = next;
+      const session = sessionRef.current;
+      const view = getView();
+      if (session && view) {
+        view.updateState(createCollabEditorState(session, view.state.doc, { showCursors: next }));
+      }
+    },
+    [getView]
+  );
 
   const stop = useCallback(() => {
     const session = sessionRef.current;
@@ -159,7 +173,7 @@ export function useCollabSession({
         // ホスト(ルームの最初の参加者)が現行の内容を共有
         seedFragmentFromProseMirror(view.state.doc, session.doc, session.fragment);
       }
-      view.updateState(createCollabEditorState(session, view.state.doc));
+      view.updateState(createCollabEditorState(session, view.state.doc, { showCursors: showCursorsRef.current }));
 
       setActive(true);
       setRoomName(room);
@@ -169,9 +183,10 @@ export function useCollabSession({
     [getView, getDocDir]
   );
 
-  // 診断ポーリング (パネル表示中かつセッション中のみ・2秒間隔・変化時のみ再描画)
+  // 診断ポーリング (セッション中のみ・2秒間隔・変化時のみ再描画)
+  // ステータスバーで常時表示するため、パネルの開閉には依存しない
   useEffect(() => {
-    if (!active || !diagnosticsEnabled) return;
+    if (!active) return;
     let cancelled = false;
 
     const collect = () => {
@@ -217,7 +232,7 @@ export function useCollabSession({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [active, diagnosticsEnabled]);
+  }, [active]);
 
   /** セッションを終了し、Yjs 上の内容を Markdown として返す */
   const stopAndExtractMarkdown = useCallback((): string | null => {
@@ -234,6 +249,8 @@ export function useCollabSession({
     roleLabel,
     peers,
     diagnostics,
+    showCursors,
+    setShowCursors,
     ensure,
     stop,
     stopAndExtractMarkdown,

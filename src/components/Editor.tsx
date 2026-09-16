@@ -10,9 +10,16 @@ interface EditorProps {
   onChange?: () => void;
   /** 画像保存先フォルダの取得 (文書を切り替えても最新を参照) */
   getDocDir?: () => string | null;
+  /** HTMLコメントを表示するか (既定: 非表示) */
+  showComments?: boolean;
 }
 
-export const Editor = React.memo(function Editor({ onReady, onChange, getDocDir }: EditorProps) {
+export const Editor = React.memo(function Editor({
+  onReady,
+  onChange,
+  getDocDir,
+  showComments = false
+}: EditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   const onReadyRef = useRef(onReady);
@@ -49,7 +56,7 @@ export const Editor = React.memo(function Editor({ onReady, onChange, getDocDir 
 
   return (
     <div className="editor-container">
-      <div ref={editorRef} className="editor" />
+      <div ref={editorRef} className={showComments ? 'editor show-comments' : 'editor'} />
     </div>
   );
 });

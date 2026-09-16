@@ -6,6 +6,7 @@
 
 html, body {
   height: 100%;
+  overflow: hidden;
   font-family: 'Segoe UI', Meiryo, sans-serif;
 }
 
@@ -13,20 +14,30 @@ html, body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
+/* ヘッダーとツールバーは常に画面上部に固定 */
 .app-header {
+  flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
+  padding: 4px 12px;
   background: #f0f0f0;
   border-bottom: 1px solid #ddd;
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
 .app-title {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: normal;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-actions {
@@ -58,7 +69,9 @@ html, body {
 }
 
 .app-main {
-  flex: 1;
+  /* min-height:0 で flex 子要素の縮小を許可し、エディタ内のみスクロールさせる */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -110,3 +123,31 @@ html, body {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* ステータスバー (画面下部固定) */
+.status-bar {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 12px;
+  background: #f0f0f0;
+  border-top: 1px solid #ddd;
+  font-size: 12px;
+  color: #444;
+}
+
+.status-left {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+.status-right {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+

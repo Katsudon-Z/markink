@@ -1,42 +1,51 @@
 import * as Y from 'yjs';
 import { EditorState, Plugin } from 'prosemirror-state';
 import { schema } from './schema';
-import { keymap } from 'prosemirror-keymap';
-import { baseKeymap } from 'prosemirror-commands';
-import { dropCursor } from 'prosemirror-dropcursor';
-import { gapCursor } from 'prosemirror-gapcursor';
-import { defaultMarkdownSerializer } from 'prosemirror-markdown';
-import { placeholderPlugin } from './image';
-import {
-  ySyncPlugin,
-  yCursorPlugin,
-  yUndoPlugin,
-  undoCommand,
-  redoCommand,
-  prosemirrorToYXmlFragment,
-  yXmlFragmentToProsemirror
-} from 'y-prosemirror';
+import { markdownSerializer } from './markdown';
+import { createBasePlugins } from './plugins';
+import { ySyncPlugin, yCursorPlugin, prosemirrorToYXmlFragment, yXmlFragmentToProsemirror } from 'y-prosemirror';
 
 // y-prosemirror による Yjs ↔ ProseMirror 連携 (requirements.md:110)
 
-export function createCollabPlugins(session: {
-  fragment: Y.XmlFragment;
-  awareness: import('y-protocols/awareness').Awareness;
-}): Plugin[] {
-  return [
+export interface CollabPluginOptions {
+  /** 相手のカーソルと名前ラベルを表示するか (既定: 表示する) */
+  showCursors?: boolean;
+}
+
+/**
+ * カーソルと名前ラベル。ラベルは絶対配置のオーバーレイなので
+ * 本文の折り返しや行位置に影響しない。
+ */
+export function collabCursorBuilder(user: { name?: string; color?: string }): HTMLElement {
+  const color = user?.color ?? '#999';
+  const caret = document.createElement('span');
+  caret.className = 'mdn-collab-cursor';
+  caret.style.borderColor = color;
+
+  const label = document.createElement('span');
+  label.className = 'mdn-collab-label';
+  label.style.backgroundColor = color;
+  label.textContent = user?.name ?? '';
+  caret.appendChild(label);
+
+  return caret;
+}
+
+export function createCollabPlugins(
+  session: {
+    fragment: Y.XmlFragment;
+    awareness: import('y-protocols/awareness').Awareness;
+  },
+  options: CollabPluginOptions = {}
+): Plugin[] {
+  const plugins: Plugin[] = [
     ySyncPlugin(session.fragment),
-    yCursorPlugin(session.awareness),
-    yUndoPlugin(),
-    // 共同編集時は Yjs の Undo/Redo を使用 (履歴は全員で共有)
-    keymap({
-      'Mod-z': undoCommand,
-      'Mod-y': redoCommand
-    }),
-    keymap(baseKeymap),
-    dropCursor(),
-    gapCursor(),
-    placeholderPlugin('入力例: ここに入力してください。上部のボタンで見出しや箇条書きも作れます。')
+    ...createBasePlugins({ historyMode: 'collab' })
   ];
+  if (options.showCursors !== false) {
+    plugins.splice(1, 0, yCursorPlugin(session.awareness, { cursorBuilder: collabCursorBuilder }));
+  }
+  return plugins;
 }
 
 export function createCollabEditorState(
@@ -45,7 +54,8 @@ export function createCollabEditorState(
     awareness: import('y-protocols/awareness').Awareness;
   },
   // フラグメントが空(参加側で同期前)の場合の初期文書。同期到着後は自動で置換される
-  fallbackDoc?: EditorState['doc']
+  fallbackDoc?: EditorState['doc'],
+  options: CollabPluginOptions = {}
 ): EditorState {
   const doc =
     session.fragment.length > 0
@@ -54,7 +64,7 @@ export function createCollabEditorState(
   return EditorState.create({
     doc,
     schema,
-    plugins: createCollabPlugins(session)
+    plugins: createCollabPlugins(session, options)
   });
 }
 
@@ -74,6 +84,6 @@ export function seedFragmentFromProseMirror(
 // 共同編集終了時: Yjs の内容を Markdown に変換
 export function fragmentToMarkdown(fragment: Y.XmlFragment): string {
   const pmDoc = yXmlFragmentToProsemirror(schema, fragment);
-  return defaultMarkdownSerializer.serialize(pmDoc);
+  return markdownSerializer.serialize(pmDoc);
 }
 
