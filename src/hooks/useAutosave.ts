@@ -90,6 +90,9 @@ export function useAutosave({ getView, getRoomName, getDocPath, onSaved }: UseAu
     timer.current = setTimeout(flush, AUTOSAVE_DEBOUNCE_MS);
   }, [flush]);
 
+  /** 未保存の変更があるか (MCP get_document の dirty 応答用) */
+  const isDirty = useCallback(() => dirty.current, []);
+
   /** 保留中の保存を即時実行 (終了時・保存時など) */
   const flushNow = useCallback(() => {
     if (timer.current) {
@@ -126,6 +129,7 @@ export function useAutosave({ getView, getRoomName, getDocPath, onSaved }: UseAu
   return {
     restoreCandidate,
     markDirty,
+    isDirty,
     flushNow,
     loadRestoreCandidate,
     clearRestoreCandidate,

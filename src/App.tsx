@@ -9,11 +9,14 @@ import { baseName, dirName, stem as stemOfPath } from './lib/path';
 import { ipc } from './lib/ipc';
 import { useAutosave } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
-import { useDocumentActions, useStartupFile } from './hooks/useDocumentActions';
+import { useDocumentActions, useStartupFile, UNTITLED } from './hooks/useDocumentActions';
+import { useMcpBridge } from './hooks/useMcpBridge';
+import { AiSettingsPanel } from './components/AiSettingsPanel';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [showAi, setShowAi] = useState(false);
   const [suggestedRoom, setSuggestedRoom] = useState<string | undefined>(undefined);
 
   const viewRef = useRef<EditorView | null>(null);
@@ -73,6 +76,67 @@ function App() {
 
   useStartupFile((path) => {
     void docRef.current?.openByPath(path);
+  });
+
+  // AI共同編集 (MCP): Rust gateway からのツール実行要求を受ける
+  const getMcpTitle = useCallback(() => docRef.current?.title ?? UNTITLED, []);
+  const getMcpDirty = useCallback(() => autosave.isDirty(), [autosave]);
+  const getMcpAutoSave = useCallback(() => ipc.mcpGetAiAutoSave(), []);
+  const saveMcpDocument = useCallback(
+    () =>
+      new Promise<{ path: string }>((resolve, reject) => {
+        const docApi = docRef.current;
+        const currentPath = pathRef.current;
+        if (!docApi) {
+          reject(new Error('文書操作が準備できていません'));
+          return;
+        }
+        if (!currentPath) {
+          reject(
+            new Error('まだファイルに保存されていない文書です。人間が「保存」で保存してから実行してください')
+          );
+          return;
+        }
+        docApi.saveCurrent(() => resolve({ path: currentPath }));
+      }),
+    []
+  );
+  const [aiConfirm, setAiConfirm] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(
+    null
+  );
+  const confirmMcpReplace = useCallback(
+    (summary: string) =>
+      new Promise<boolean>((resolve) => {
+        setAiConfirm({
+          summary,
+          resolve: (ok) => {
+            setAiConfirm(null);
+            resolve(ok);
+          }
+        });
+      }),
+    []
+  );
+  // AIからの人間向け通知 (トースト表示・6秒で自動消去)
+  const [aiNotice, setAiNotice] = useState<{ id: number; message: string } | null>(null);
+  useEffect(() => {
+    if (!aiNotice) return;
+    const timer = setTimeout(() => setAiNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [aiNotice]);
+  const notifyMcpHuman = useCallback(
+    (message: string) => setAiNotice({ id: Date.now(), message }),
+    []
+  );
+  const mcp = useMcpBridge({
+    getView,
+    getTitle: getMcpTitle,
+    getPath: getDocPath,
+    isDirty: getMcpDirty,
+    saveDocument: saveMcpDocument,
+    confirmFullReplace: confirmMcpReplace,
+    aiAutoSaveEnabled: getMcpAutoSave,
+    notifyHuman: notifyMcpHuman
   });
 
   const handleReady = useCallback(
@@ -156,6 +220,23 @@ function App() {
         </div>
       )}
 
+      {aiConfirm && (
+        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="ai-confirm-title">
+          <div className="restore-dialog">
+            <h2 id="ai-confirm-title" className="restore-title">AIからの置換要求</h2>
+            <p className="restore-message">{aiConfirm.summary}</p>
+            <div className="restore-actions">
+              <button className="btn btn-primary" onClick={() => aiConfirm.resolve(true)}>
+                許可する
+              </button>
+              <button className="btn" onClick={() => aiConfirm.resolve(false)}>
+                拒否する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="app-header">
         <div className="app-actions">
           <button className="btn" onClick={() => doc.newDocument(autosave.discardServerAutosave)}>
@@ -167,6 +248,7 @@ function App() {
           </button>
           <button className="btn" onClick={() => void doc.exportHtml()}>HTML出力</button>
           <button className="btn" onClick={() => setShowCollab((v) => !v)}>共同編集</button>
+          <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
         </div>
       </header>
 
@@ -182,7 +264,11 @@ function App() {
           roomName={collab.roomName}
           suggestedRoom={suggestedRoom}
           positionLabel={collab.roleLabel ?? undefined}
-          peers={collab.peers}
+          peers={
+            mcp.aiName
+              ? [...collab.peers, { clientID: -1, name: mcp.aiName, color: '#7c3aed', ai: true }]
+              : collab.peers
+          }
           diagnostics={collab.diagnostics}
           showCursors={collab.showCursors}
           onShowCursorsChange={collab.setShowCursors}
@@ -200,6 +286,8 @@ function App() {
         />
       )}
 
+      {showAi && <AiSettingsPanel onClose={() => setShowAi(false)} />}
+
       <main className="app-main">
         <Editor
           onReady={handleReady}
@@ -214,7 +302,15 @@ function App() {
         collabActive={collab.active}
         peersCount={collab.peers.length}
         diagnostics={collab.diagnostics}
+        aiName={mcp.aiName}
       />
+
+      {aiNotice && (
+        <div className="ai-toast" role="status" key={aiNotice.id}>
+          <span className="ai-toast-name">AI</span>
+          <span>{aiNotice.message}</span>
+        </div>
+      )}
     </div>
   );
 }

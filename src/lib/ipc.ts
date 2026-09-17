@@ -7,6 +7,24 @@ export interface SignalInfo {
   url: string;
 }
 
+/** AI共同編集 (MCP) の設定 (Rust Settings と同形) */
+export interface McpSettings {
+  mcpEnabled: boolean;
+  mcpToken: string | null;
+  aiAutoSave: boolean;
+}
+
+/** AI共同編集 (MCP) の実行状態 */
+export interface McpStatus {
+  enabled: boolean;
+  /** stdio ブリッジ用 WS のポート */
+  port: number | null;
+  /** Streamable HTTP 用のポート */
+  httpPort: number | null;
+  /** 接続中のAI表示名 (例: "AI: Claude Desktop") */
+  connection: string | null;
+}
+
 export interface RelayStats {
   rx: number;
   tx: number;
@@ -39,5 +57,17 @@ export const ipc = {
   releaseSignal: () => invoke<void>('collab_release_signal'),
   relayStats: (room: string) => invoke<RelayStats | null>('collab_relay_stats', { room }),
 
-  takeStartupFile: () => invoke<string | null>('take_startup_file')
+  takeStartupFile: () => invoke<string | null>('take_startup_file'),
+
+  mcpGetSettings: () => invoke<McpSettings>('mcp_get_settings'),
+  mcpAutostart: () => invoke<McpStatus>('mcp_autostart'),
+  mcpSetEnabled: (enabled: boolean) => invoke<McpStatus>('mcp_set_enabled', { enabled }),
+  mcpRegenerateToken: () => invoke<string>('mcp_regenerate_token'),
+  mcpStatus: () => invoke<McpStatus>('mcp_status'),
+  mcpDisconnectAi: () => invoke<void>('mcp_disconnect_ai'),
+  mcpGetAiAutoSave: () => invoke<boolean>('mcp_get_ai_auto_save'),
+  mcpSetAiAutoSave: (enabled: boolean) => invoke<void>('mcp_set_ai_auto_save', { enabled }),
+  mcpExePath: () => invoke<string>('mcp_exe_path'),
+  mcpResponse: (id: number, ok: boolean, data: unknown, error: string | null) =>
+    invoke<void>('mcp_response', { id, ok, data, error })
 };

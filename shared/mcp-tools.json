@@ -1,0 +1,135 @@
+[
+  {
+    "name": "get_document",
+    "description": "編集中の文書全体をMarkdownで取得します。title/path/dirty(未保存かどうか)も返ります。編集の前後で最新の内容と位置を確認するために使用してください。",
+    "inputSchema": { "type": "object", "properties": {}, "required": [] }
+  },
+  {
+    "name": "search",
+    "description": "文書内を検索し、ProseMirror絶対位置(from/to)と抜粋を返します。編集位置の特定に使用してください。regex=trueで正規表現が使えます。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "検索する文字列" },
+        "regex": { "type": "boolean", "description": "正規表現として解釈するか(既定:false)" },
+        "caseSensitive": { "type": "boolean", "description": "大文字小文字を区別するか(既定:false)" },
+        "maxResults": { "type": "integer", "description": "最大件数(既定:50)" }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "get_outline",
+    "description": "見出しの一覧(レベル・見出しテキスト・位置)を返します。文書構造の把握に使用してください。",
+    "inputSchema": { "type": "object", "properties": {}, "required": [] }
+  },
+  {
+    "name": "insert_text",
+    "description": "指定位置にMarkdown断片を挿入します。見出し・箇条書き・表・コードブロックなどもMarkdown記法でそのまま指定できます。適用後の範囲{from,to}を返すので、続けて編集する場合はその値を使ってください。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "position": { "type": "integer", "description": "挿入するProseMirror絶対位置" },
+        "markdown": { "type": "string", "description": "挿入するMarkdown断片" }
+      },
+      "required": ["position", "markdown"]
+    }
+  },
+  {
+    "name": "replace_range",
+    "description": "指定範囲[from,to)をMarkdown断片で置換します。文書全体を覆う置換は人間の確認ダイアログが入ります。適用後の範囲{from,to}を返します。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "from": { "type": "integer", "description": "置換開始位置" },
+        "to": { "type": "integer", "description": "置換終了位置(含まない)" },
+        "markdown": { "type": "string", "description": "置換後のMarkdown断片" }
+      },
+      "required": ["from", "to", "markdown"]
+    }
+  },
+  {
+    "name": "replace_all",
+    "description": "検索文字列をすべて置換します。置換件数{replaced}を返します。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "search": { "type": "string", "description": "検索する文字列" },
+        "replacement": { "type": "string", "description": "置換後の文字列" },
+        "caseSensitive": { "type": "boolean", "description": "大文字小文字を区別するか(既定:false)" }
+      },
+      "required": ["search", "replacement"]
+    }
+  },
+  {
+    "name": "apply_markdown",
+    "description": "意味的な挿入位置(見出しの直下・文末・指定位置)にMarkdown断片を適用します。anchorには position / heading(見出しテキスト) / end:true のいずれか1つを指定します。適用後の範囲{from,to}を返します。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "anchor": {
+          "type": "object",
+          "description": "挿入位置。{position:int} / {heading:string}(一致する見出しの直下) / {end:true}(文末) のいずれか",
+          "properties": {
+            "position": { "type": "integer" },
+            "heading": { "type": "string" },
+            "end": { "type": "boolean" }
+          }
+        },
+        "markdown": { "type": "string", "description": "適用するMarkdown断片" }
+      },
+      "required": ["anchor", "markdown"]
+    }
+  },
+  {
+    "name": "set_heading",
+    "description": "指定位置を含むブロックを見出し(level 1-6)に設定します。level=0で通常の段落に戻します。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "position": { "type": "integer", "description": "対象ブロック内のProseMirror絶対位置" },
+        "level": { "type": "integer", "description": "見出しレベル(1-6)。0で段落に戻す" }
+      },
+      "required": ["position", "level"]
+    }
+  },
+  {
+    "name": "set_cursor",
+    "description": "AIカーソル(人間に見える名前ラベル付きのカーソル)を指定位置へ移動します。人間のカーソルや選択範囲は動きません。編集中の内容を人間に示したいときに使用してください。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "from": { "type": "integer", "description": "カーソル開始位置" },
+        "to": { "type": "integer", "description": "カーソル終了位置(省略時はfromと同じ)" },
+        "scroll": { "type": "boolean", "description": "画面をスクロールするか(既定:true)" }
+      },
+      "required": ["from"]
+    }
+  },
+  {
+    "name": "get_cursor",
+    "description": "現在のAIカーソル位置{from,to}を返します。未設定の場合は人間のキャレット位置を返します。",
+    "inputSchema": { "type": "object", "properties": {}, "required": [] }
+  },
+  {
+    "name": "save_document",
+    "description": "文書をファイルに保存します。未保存(名前を付けていない)文書ではエラーになります。自動保存が有効な場合は通常このツールは不要です。",
+    "inputSchema": { "type": "object", "properties": {}, "required": [] }
+  },
+  {
+    "name": "notify_human",
+    "description": "人間の利用者に短いメッセージを通知します(ステータスバーに表示)。質問や完了報告に使用してください。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "message": { "type": "string", "description": "表示するメッセージ" }
+      },
+      "required": ["message"]
+    }
+  },
+  {
+    "name": "disconnect",
+    "description": "AI接続を終了し、接続スロットを解放します。作業終了時に呼んでください (Rust側で処理され、エディタには転送されません)。",
+    "inputSchema": { "type": "object", "properties": {}, "required": [] }
+  }
+]

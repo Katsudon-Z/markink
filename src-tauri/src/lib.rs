@@ -4,6 +4,8 @@ mod collab_host;
 mod collab_relay;
 mod document;
 mod fsutil;
+mod mcp;
+mod settings;
 mod startup;
 
 use collab_host::{collab_probe_signal, collab_release_signal, collab_resolve_signal};
@@ -16,6 +18,12 @@ fn collab_relay_stats(room: String) -> Option<collab_relay::RelayStats> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // mcp-stdio モード: GUI を起動せず、stdin/stdout ⇄ 本体WS の中継専用プロセスとして動く。
+    // single-instance プラグインより前で分岐すること (mcp-plan.md §2.0)。
+    if mcp::transport_stdio::is_stdio_mode() {
+        mcp::transport_stdio::run_stdio_mode();
+    }
+
     startup::init_from_args();
 
     tauri::Builder::default()
@@ -44,7 +52,18 @@ pub fn run() {
             collab_relay_stats,
             collab_resolve_signal,
             collab_probe_signal,
-            collab_release_signal
+            collab_release_signal,
+            // AI共同編集 (MCP)
+            settings::mcp_get_settings,
+            mcp::mcp_autostart,
+            mcp::mcp_set_enabled,
+            mcp::mcp_regenerate_token,
+            mcp::mcp_status,
+            mcp::mcp_disconnect_ai,
+            mcp::mcp_get_ai_auto_save,
+            mcp::mcp_set_ai_auto_save,
+            mcp::mcp_exe_path,
+            mcp::gateway::mcp_response
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

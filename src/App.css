@@ -151,3 +151,100 @@ html, body {
   text-overflow: ellipsis;
 }
 
+/* AI接続バッジ (ステータスバー内) */
+.status-ai-badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* AIからの通知トースト (右下) */
+.ai-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 40px;
+  max-width: 24em;
+  padding: 8px 12px;
+  background: #1e1b2e;
+  color: #fff;
+  border-left: 4px solid #7c3aed;
+  border-radius: 6px;
+  font-size: 13px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 100;
+}
+
+.ai-toast-name {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #7c3aed;
+  font-size: 11px;
+}
+
+/* AI設定パネル */
+.ai-settings {
+  max-width: 34em;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.ai-settings-heading {
+  font-size: 14px;
+  margin: 16px 0 4px;
+}
+
+.ai-settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.ai-settings-row small {
+  color: #666;
+}
+
+.ai-settings-row code {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.ai-settings-token {
+  max-width: 22em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-settings-code {
+  font-size: 12px;
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 10em;
+  overflow-y: auto;
+}
+
+.ai-settings-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.ai-settings-error {
+  color: #b91c1c;
+  font-size: 13px;
+}
+

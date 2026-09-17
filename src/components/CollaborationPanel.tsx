@@ -8,7 +8,7 @@ interface CollabPanelProps {
   roomName?: string;
   suggestedRoom?: string;
   positionLabel?: string;
-  peers?: { clientID: number; name: string; color: string }[];
+  peers?: { clientID: number; name: string; color: string; ai?: boolean }[];
   diagnostics: CollabDiagnostics;
   showCursors?: boolean;
   onShowCursorsChange?: (next: boolean) => void;
@@ -68,6 +68,7 @@ export const CollaborationPanel: React.FC<CollabPanelProps> = ({
                 {peers.map((p) => (
                   <li key={p.clientID}>
                     <span className="collab-peer-dot" style={{ background: p.color }} />
+                    {p.ai && <span className="collab-peer-ai">AI</span>}
                     {p.name}
                   </li>
                 ))}

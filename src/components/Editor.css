@@ -102,8 +102,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
-  user-select: none;
-  z-index: 5;
+}
+
+/* AIカーソルの選択範囲 (薄い紫) */
+.mdn-ai-selection {
+  background: rgba(124, 58, 237, 0.15);
 }
 
 /* ProseMirror 基本スタイル */

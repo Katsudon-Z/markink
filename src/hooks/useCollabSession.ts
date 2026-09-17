@@ -3,6 +3,7 @@ import { EditorView } from 'prosemirror-view';
 import type { CollabSession, PeerInfo } from '../lib/collaboration/session';
 import { loadCollabModules, type CollabModules } from '../lib/collaboration/load';
 import { ipc, type RelayStats } from '../lib/ipc';
+import { attachAwareness, refreshAiCursor } from '../lib/mcp/presence';
 
 const DIAGNOSTICS_INTERVAL_MS = 2000;
 
@@ -106,6 +107,8 @@ export function useCollabSession({
     const session = sessionRef.current;
     if (!session) return null;
     sessionRef.current = null;
+    // AIプレゼンスの Awareness 連携を外す (ローカル装飾は維持)
+    attachAwareness(null);
     void ipc.releaseSignal().catch(() => {});
     modulesRef.current?.session.stopCollabSession(session);
     updateCountRef.current = 0;
@@ -141,9 +144,15 @@ export function useCollabSession({
 
       const session = modules.session.startCollabSession({ roomName: room, signalingUrl: url });
       sessionRef.current = session;
+      // AIプレゼンスを Awareness に接続 (人間の user フィールドは触らない)
+      attachAwareness(session.awareness);
 
-      const updatePeers = () =>
+      const updatePeers = () => {
         setPeers(modules.session.listPeers(session.awareness, session.doc.clientID));
+        // リモート AI カーソルの再描画 (Awareness 変化時)
+        const view = getView();
+        if (view) refreshAiCursor(view);
+      };
       updatePeers();
       session.awareness.on('change', updatePeers);
 
