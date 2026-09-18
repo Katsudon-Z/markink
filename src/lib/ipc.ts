@@ -14,6 +14,14 @@ export interface McpSettings {
   aiAutoSave: boolean;
   /** 前回保存していない内容の復元機能を使うか (既定: 無効) */
   restoreEnabled: boolean;
+  /** エディタ起点のAI呼び出しを使うか (既定: 無効) */
+  aiCallEnabled: boolean;
+  /** serve に渡すモデル (空なら serve 側の既定) */
+  aiModel: string;
+  /** serve のURL (localhost のみ) */
+  aiBackendUrl: string;
+  aiTimeoutSecs: number;
+  aiMaxChars: number;
 }
 
 /** AI共同編集 (MCP) の実行状態 */
@@ -88,5 +96,35 @@ export const ipc = {
       origin,
       cursorFrom,
       cursorTo
-    })
+    }),
+
+  // ---- エディタ起点のAI呼び出し (opencode serve) ----
+  aiAutostart: () => invoke<AiServeStatus>('ai_autostart'),
+  aiStatus: () => invoke<AiServeStatus>('ai_status'),
+  aiSetEnabled: (enabled: boolean) => invoke<AiServeStatus>('ai_set_enabled', { enabled }),
+  aiSetConfig: (config: {
+    model?: string;
+    backendUrl?: string;
+    maxChars?: number;
+    timeoutSecs?: number;
+    opencodeBin?: string;
+  }) => invoke<AiServeStatus>('ai_set_config', { config }),
+  aiAsk: (mode: AiModeId, prompt: string, context: string) =>
+    invoke<AiAnswer>('ai_ask', { mode, prompt, context }),
+  aiAbort: () => invoke<void>('ai_abort')
 };
+
+/** エディタ起点AI呼び出しの用途 */
+export type AiModeId = 'summary' | 'continue' | 'question' | 'edit';
+
+/** serve デーモンの状態 */
+export interface AiServeStatus {
+  enabled: boolean;
+  running: boolean;
+  url: string;
+}
+
+/** AIの応答 */
+export interface AiAnswer {
+  text: string;
+}

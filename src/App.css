@@ -248,3 +248,58 @@ html, body {
   font-size: 13px;
 }
 
+
+/* エディタ右クリックのAIメニュー */
+.ai-context-menu {
+  position: fixed;
+  z-index: 1200;
+  width: 256px;
+  background: #fff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+}
+.ai-menu-info {
+  font-size: 12px;
+  color: #666;
+  padding: 6px 8px;
+}
+.ai-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.ai-menu-item:hover {
+  background: #f0f0f0;
+}
+.ai-menu-item small {
+  color: #888;
+  font-size: 11px;
+}
+.ai-menu-input {
+  width: calc(100% - 16px);
+  margin: 4px 8px;
+  padding: 6px 8px;
+  border: 1px solid #d4d4d4;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.ai-menu-hint {
+  font-size: 12px;
+  color: #b45309;
+  padding: 2px 8px 6px;
+}
+.ai-menu-sub span {
+  color: #1d4ed8;
+}
+.ai-result-pre {
+  max-height: 20em;
+}

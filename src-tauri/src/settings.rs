@@ -9,6 +9,12 @@ use serde::{Deserialize, Serialize};
 /// tauri.conf.json の identifier と一致させる (テストで検証)
 pub const APP_IDENTIFIER: &str = "com.mdnotepad.app";
 
+/// エディタ起点のAI呼び出し (opencode serve) の既定値
+pub const DEFAULT_AI_BACKEND_URL: &str = "http://127.0.0.1:4096";
+pub const DEFAULT_AI_TIMEOUT_SECS: u64 = 120;
+pub const DEFAULT_AI_MAX_CHARS: usize = 8000;
+pub const DEFAULT_OPENCODE_BIN: &str = "opencode";
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -21,11 +27,34 @@ pub struct Settings {
     /// 前回保存していない内容の復元機能を使うか。既定は無効 (OFF)。
     /// 無効時は自動保存の書き込みも復元提案も行わない。
     pub restore_enabled: bool,
+    /// エディタ起点のAI呼び出し (opencode serve) を使うか。既定は無効。
+    pub ai_call_enabled: bool,
+    /// serve に渡すモデル (空なら serve 側の既定。例: "opencode-go/kimi-k3")
+    pub ai_model: String,
+    /// serve のURL (localhost のみ許可)
+    pub ai_backend_url: String,
+    /// 応答待ちタイムアウト秒
+    pub ai_timeout_secs: u64,
+    /// 送信する文書の上限文字数
+    pub ai_max_chars: usize,
+    /// opencode 実行ファイル名またはパス
+    pub opencode_bin: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { mcp_enabled: false, mcp_token: None, ai_auto_save: true, restore_enabled: false }
+        Self {
+            mcp_enabled: false,
+            mcp_token: None,
+            ai_auto_save: true,
+            restore_enabled: false,
+            ai_call_enabled: false,
+            ai_model: String::new(),
+            ai_backend_url: DEFAULT_AI_BACKEND_URL.to_string(),
+            ai_timeout_secs: DEFAULT_AI_TIMEOUT_SECS,
+            ai_max_chars: DEFAULT_AI_MAX_CHARS,
+            opencode_bin: DEFAULT_OPENCODE_BIN.to_string(),
+        }
     }
 }
 
@@ -156,5 +185,17 @@ mod tests {
         assert_eq!(t1.len(), 32);
         assert!(t1.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn ai_call_defaults_off_for_old_files() {
+        // エディタ起点のAI呼び出しは既定で無効。旧設定ファイルでも補完される
+        assert!(!Settings::default().ai_call_enabled);
+        let parsed: Settings = serde_json::from_str(r#"{"mcpEnabled":true}"#).unwrap();
+        assert!(!parsed.ai_call_enabled);
+        assert_eq!(parsed.ai_backend_url, DEFAULT_AI_BACKEND_URL);
+        assert_eq!(parsed.ai_timeout_secs, DEFAULT_AI_TIMEOUT_SECS);
+        assert_eq!(parsed.ai_max_chars, DEFAULT_AI_MAX_CHARS);
+        assert!(parsed.ai_model.is_empty());
     }
 }

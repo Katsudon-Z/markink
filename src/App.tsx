@@ -7,13 +7,17 @@ import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
 import { bumpDocVersion } from './lib/mcp/docVersion';
 import { baseName, dirName, stem as stemOfPath } from './lib/path';
-import { ipc } from './lib/ipc';
+import { ipc, type AiModeId } from './lib/ipc';
 import { useAutosave } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
 import { useDocumentActions, useStartupFile, UNTITLED } from './hooks/useDocumentActions';
 import { useMcpBridge } from './hooks/useMcpBridge';
 import { AiSettingsPanel } from './components/AiSettingsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
+import { AiContextMenu } from './components/AiContextMenu';
+import { AiResultDialog } from './components/AiResultDialog';
+import { buildAiContext, aiModeLabel } from './lib/ai/context';
+import { insertAiMarkdown, replaceAiRange } from './lib/ai/applyResult';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
@@ -192,6 +196,135 @@ function App() {
     [autosave]
   );
 
+  // ---- エディタ起点のAI呼び出し (右クリックメニュー → 結果ダイアログ) ----
+  const [aiMenu, setAiMenu] = useState<{ x: number; y: number } | null>(null);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiRun, setAiRun] = useState<{
+    mode: AiModeId;
+    selFrom: number;
+    selTo: number;
+    cursorPos: number;
+    hasSelection: boolean;
+    text: string;
+    error: string | null;
+  } | null>(null);
+  const [aiBusy, setAiBusy] = useState<{ mode: AiModeId; startedAt: number } | null>(null);
+  const [aiElapsed, setAiElapsed] = useState(0);
+
+  // アプリ起動時にAIサーバを自動開始 (有効時のみ)
+  useEffect(() => {
+    void ipc
+      .aiAutostart()
+      .then((st) => setAiEnabled(st.enabled))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!aiBusy) {
+      setAiElapsed(0);
+      return;
+    }
+    setAiElapsed(0);
+    const timer = window.setInterval(
+      () => setAiElapsed(Math.floor((Date.now() - aiBusy.startedAt) / 1000)),
+      500
+    );
+    return () => window.clearInterval(timer);
+  }, [aiBusy]);
+
+  const handleEditorContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest?.('.ProseMirror')) return;
+      e.preventDefault();
+      void ipc
+        .mcpGetSettings()
+        .then((s) => setAiEnabled(s.aiCallEnabled))
+        .catch(() => {});
+      setAiMenu({ x: e.clientX, y: e.clientY });
+    },
+    []
+  );
+
+  const executeAi = useCallback(
+    (mode: AiModeId, prompt: string) => {
+      const view = viewRef.current;
+      if (!view) {
+        notifyMcpHuman('エディタが準備できていません');
+        return;
+      }
+      if ((mode === 'question' || mode === 'edit') && !prompt.trim()) {
+        notifyMcpHuman('指示・質問を入力してください');
+        return;
+      }
+      let built;
+      try {
+        built = buildAiContext(view, mode, 8000);
+      } catch (err) {
+        notifyMcpHuman(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      if (!built.context.trim()) {
+        notifyMcpHuman('送信できる文書がありません');
+        return;
+      }
+      setAiMenu(null);
+      setAiBusy({ mode, startedAt: Date.now() });
+      setAiRun({
+        mode,
+        selFrom: built.selFrom,
+        selTo: built.selTo,
+        cursorPos: built.cursorPos,
+        hasSelection: built.hasSelection,
+        text: '',
+        error: null
+      });
+      void (async () => {
+        try {
+          const answer = await ipc.aiAsk(mode, prompt, built.context);
+          setAiRun((prev) =>
+            prev && prev.mode === mode ? { ...prev, text: answer.text } : prev
+          );
+        } catch (err) {
+          setAiRun((prev) =>
+            prev && prev.mode === mode
+              ? { ...prev, error: err instanceof Error ? err.message : String(err) }
+              : prev
+          );
+        } finally {
+          setAiBusy((prev) => (prev && prev.mode === mode ? null : prev));
+        }
+      })();
+    },
+    [notifyMcpHuman]
+  );
+
+  const abortAi = useCallback(() => {
+    void ipc.aiAbort().catch((err) => notifyMcpHuman(String(err)));
+  }, [notifyMcpHuman]);
+
+  const applyAiInsert = useCallback(() => {
+    const view = viewRef.current;
+    if (!view || !aiRun?.text) return;
+    try {
+      insertAiMarkdown(view, aiRun.cursorPos, aiRun.text);
+      setAiRun(null);
+    } catch (err) {
+      notifyMcpHuman(err instanceof Error ? err.message : String(err));
+    }
+  }, [aiRun, notifyMcpHuman]);
+
+  const applyAiReplace = useCallback(() => {
+    const view = viewRef.current;
+    if (!view || !aiRun?.text) return;
+    try {
+      replaceAiRange(view, aiRun.selFrom, aiRun.selTo, aiRun.text);
+      setAiRun(null);
+    } catch (err) {
+      notifyMcpHuman(err instanceof Error ? err.message : String(err));
+    }
+  }, [aiRun, notifyMcpHuman]);
+
   const handleFormat = useCallback((format: string, payload?: { href?: string }) => {
     if (viewRef.current) applyFormat(viewRef.current, format, payload);
   }, []);
@@ -344,7 +477,7 @@ function App() {
         />
       )}
 
-      <main className="app-main">
+      <main className="app-main" onContextMenu={handleEditorContextMenu}>
         <Editor
           onReady={handleReady}
           onChange={autosave.markDirty}
@@ -352,6 +485,45 @@ function App() {
           showComments={showComments}
         />
       </main>
+
+      {aiMenu && viewRef.current && (
+        <AiContextMenu
+          x={aiMenu.x}
+          y={aiMenu.y}
+          enabled={aiEnabled}
+          contextChars={(() => {
+            try {
+              return buildAiContext(viewRef.current!, 'question', 8000).context.length;
+            } catch {
+              return 0;
+            }
+          })()}
+          hasSelection={!viewRef.current.state.selection.empty}
+          onExecute={executeAi}
+          onClose={() => setAiMenu(null)}
+          onOpenSettings={() => {
+            setAiMenu(null);
+            setShowSettings(true);
+          }}
+        />
+      )}
+
+      {(aiBusy || aiRun) && (
+        <AiResultDialog
+          title={aiModeLabel((aiBusy ?? aiRun)?.mode ?? 'question')}
+          busy={aiBusy != null}
+          elapsedSecs={aiElapsed}
+          text={aiRun?.text ?? ''}
+          canReplace={aiRun?.hasSelection === true || aiRun?.mode === 'edit'}
+          error={aiRun?.error ?? null}
+          onInsert={applyAiInsert}
+          onReplace={applyAiReplace}
+          onAbort={abortAi}
+          onClose={() => {
+            setAiRun(null);
+          }}
+        />
+      )}
 
       <StatusBar
         path={doc.path}

@@ -1,4 +1,5 @@
 // MDNotepad バックエンド: 各関心ごとにモジュール分割し、ここは編成のみを行う
+mod ai_serve;
 mod autosave;
 mod collab_host;
 mod collab_relay;
@@ -65,7 +66,14 @@ pub fn run() {
             mcp::mcp_set_ai_auto_save,
             mcp::mcp_exe_path,
             mcp::notify::mcp_doc_changed,
-            mcp::gateway::mcp_response
+            mcp::gateway::mcp_response,
+            // エディタ起点のAI呼び出し (opencode serve)
+            ai_serve::ai_autostart,
+            ai_serve::ai_status,
+            ai_serve::ai_set_enabled,
+            ai_serve::ai_set_config,
+            ai_serve::ai_ask,
+            ai_serve::ai_abort
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
