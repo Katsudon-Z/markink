@@ -32,6 +32,8 @@ interface UseAutosaveOptions {
   getRoomName?: () => string | null;
   /** 一緒に保存する文書パス (復元時に元のファイルとして開き直す) */
   getDocPath?: () => string | null;
+  /** 前回保存していない内容の復元機能を使うか (既定: 無効) */
+  getRestoreEnabled: () => boolean;
   /** 自動保存が実際に書き込まれたとき (最終保存時刻の表示などに利用) */
   onSaved?: () => void;
 }
@@ -39,8 +41,9 @@ interface UseAutosaveOptions {
 /**
  * 編集のたびにデバウンスして自動保存し、起動時に復元候補を提示する (requirements.md:48)
  * - 変更が無い場合はシリアライズも書き込みもしない (軽快さ優先)
+ * - 復元機能が無効 (既定) の場合は書き込みも復元提案もしない
  */
-export function useAutosave({ getView, getRoomName, getDocPath, onSaved }: UseAutosaveOptions) {
+export function useAutosave({ getView, getRoomName, getDocPath, getRestoreEnabled, onSaved }: UseAutosaveOptions) {
   const [restoreCandidate, setRestoreCandidate] = useState<AutosaveData | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirty = useRef(false);
@@ -85,10 +88,12 @@ export function useAutosave({ getView, getRoomName, getDocPath, onSaved }: UseAu
 
   /** 変更を検知してデバウンス保存を予約する */
   const markDirty = useCallback(() => {
+    // 復元機能が無効の場合は自動保存自体を行わない
+    if (!getRestoreEnabled()) return;
     dirty.current = true;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(flush, AUTOSAVE_DEBOUNCE_MS);
-  }, [flush]);
+  }, [flush, getRestoreEnabled]);
 
   /** 未保存の変更があるか (MCP get_document の dirty 応答用) */
   const isDirty = useCallback(() => dirty.current, []);
@@ -105,13 +110,15 @@ export function useAutosave({ getView, getRoomName, getDocPath, onSaved }: UseAu
 
   /** 起動時の復元候補を読み込む */
   const loadRestoreCandidate = useCallback(async () => {
+    // 復元機能が無効の場合は提案しない (読み込み自体を行わない)
+    if (!getRestoreEnabled()) return;
     try {
       const saved = await ipc.readAutosave();
       if (saved) setRestoreCandidate(saved);
     } catch {
       window.alert('復元データの確認でエラーが発生しました。続行できますが、前回の内容は利用できません。');
     }
-  }, []);
+  }, [getRestoreEnabled]);
 
   const clearRestoreCandidate = useCallback(() => setRestoreCandidate(null), []);
 

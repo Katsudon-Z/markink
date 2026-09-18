@@ -10,6 +10,7 @@ import { yUndoPlugin, undoCommand as yUndo, redoCommand as yRedo } from 'y-prose
 import { schema } from './schema';
 import { placeholderPlugin } from './image';
 import { aiCursorPlugin, getAttachedAwareness } from '../mcp/presence';
+import { docVersionPlugin } from '../mcp/docVersion';
 
 export const PLACEHOLDER_HINT =
   '入力例: ここに入力してください。上部のボタンで見出しや箇条書きも作れます。';
@@ -56,6 +57,8 @@ export function createBasePlugins({ historyMode }: BasePluginOptions): Plugin[] 
     tableEditing(),
     // AI共同編集のカーソル (接続中のみ描画。単独・共同の両モードで有効)
     aiCursorPlugin(getAttachedAwareness),
+    // 文書版の監視 (変更検知用。AI編集と人間編集を区別する)
+    docVersionPlugin(),
     keymap(historyKeys),
     // Enter/Shift+Enter は baseKeymap より先に評価する
     keymap({

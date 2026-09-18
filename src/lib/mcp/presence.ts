@@ -64,16 +64,20 @@ export function getAttachedAwareness(): AwarenessLike | null {
 
 /** AI状態を Awareness の `ai` フィールドへ反映 (`user` には触れない) */
 function mirrorToAwareness(): void {
-  if (!awareness?.setLocalStateField) return;
-  if (aiCursor && aiName) {
-    awareness.setLocalStateField('ai', {
-      name: aiName,
-      color: AI_CURSOR_COLOR,
-      anchor: aiCursor.from,
-      head: aiCursor.to
-    });
-  } else {
-    awareness.setLocalStateField('ai', undefined);
+  try {
+    if (!awareness?.setLocalStateField) return;
+    if (aiCursor && aiName) {
+      awareness.setLocalStateField('ai', {
+        name: aiName,
+        color: AI_CURSOR_COLOR,
+        anchor: aiCursor.from,
+        head: aiCursor.to
+      });
+    } else {
+      awareness.setLocalStateField('ai', undefined);
+    }
+  } catch {
+    // 破棄済み Awareness 等の例外で AI 接続状態を壊さない
   }
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EditorView } from 'prosemirror-view';
 import { createEditorState, markdownSerializer } from '../../src/lib/prosemirror/editor';
-import { clearAiCursor } from '../../src/lib/mcp/presence';
+import { clearAiCursor, getAiCursor } from '../../src/lib/mcp/presence';
 import { getToolHandler } from '../../src/lib/mcp/tools';
 import type { ToolContext, ToolHandler } from '../../src/lib/mcp/types';
 
@@ -283,5 +283,77 @@ describe('編集後の整合性', () => {
     ]) {
       expect(getToolHandler(name), `${name} が未登録`).toBeDefined();
     }
+  });
+});
+
+describe('AI編集後のカーソル自動表示', () => {
+  it('insert_text は適用範囲にAIカーソルを置く (人間選択は不変)', async () => {
+    const view = createView('あいうえお\n');
+    const selBefore = view.state.selection.toJSON();
+    const handler = getToolHandler('insert_text')!;
+    const result = (await handler({ position: 3, markdown: 'かき' }, makeCtx(view))) as {
+      from: number;
+      to: number;
+    };
+    expect(getAiCursor()).toEqual({ from: result.from, to: result.to });
+    expect(view.state.selection.toJSON()).toEqual(selBefore);
+    view.destroy();
+  });
+
+  it('replace_range は置換後の範囲にAIカーソルを置く', async () => {
+    const view = createView('あいうえお\n');
+    const handler = getToolHandler('replace_range')!;
+    const result = (await handler({ from: 1, to: 3, markdown: 'か' }, makeCtx(view))) as {
+      from: number;
+      to: number;
+    };
+    expect(getAiCursor()).toEqual({ from: result.from, to: result.to });
+    view.destroy();
+  });
+
+  it('replace_range の削除は削除位置に折りたたんだカーソルを置く', async () => {
+    const view = createView('あいうえお\n');
+    const handler = getToolHandler('replace_range')!;
+    const result = (await handler({ from: 1, to: 3, markdown: '' }, makeCtx(view))) as {
+      from: number;
+      to: number;
+    };
+    expect(result.to).toBe(result.from);
+    expect(getAiCursor()).toEqual({ from: result.from, to: result.from });
+    view.destroy();
+  });
+
+  it('replace_all は最初の一致位置に折りたたんだカーソルを置く', async () => {
+    const view = createView('りんごとみかん、りんごジュース\n');
+    const handler = getToolHandler('replace_all')!;
+    const result = (await handler(
+      { search: 'りんご', replacement: 'ぶどう' },
+      makeCtx(view)
+    )) as { replaced: number };
+    expect(result.replaced).toBe(2);
+    const cursor = getAiCursor();
+    expect(cursor).not.toBeNull();
+    expect(cursor!.to).toBe(cursor!.from);
+    expect(view.state.doc.textBetween(cursor!.from, cursor!.from + 'ぶどう'.length)).toBe('ぶどう');
+    view.destroy();
+  });
+
+  it('apply_markdown は適用範囲にAIカーソルを置く', async () => {
+    const view = createView('本文\n');
+    const handler = getToolHandler('apply_markdown')!;
+    const result = (await handler(
+      { anchor: { end: true }, markdown: '追記\n' },
+      makeCtx(view)
+    )) as { from: number; to: number };
+    expect(getAiCursor()).toEqual({ from: result.from, to: result.to });
+    view.destroy();
+  });
+
+  it('set_heading は対象位置にAIカーソルを置く', async () => {
+    const view = createView('# 見出し\n');
+    const handler = getToolHandler('set_heading')!;
+    await handler({ position: 1, level: 2 }, makeCtx(view));
+    expect(getAiCursor()).toEqual({ from: 1, to: 1 });
+    view.destroy();
   });
 });

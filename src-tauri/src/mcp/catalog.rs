@@ -56,6 +56,8 @@ mod tests {
             "get_document",
             "search",
             "get_outline",
+            "get_version",
+            "get_changes",
             "insert_text",
             "replace_range",
             "replace_all",

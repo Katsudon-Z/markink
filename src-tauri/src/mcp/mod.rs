@@ -12,6 +12,7 @@
 pub mod catalog;
 pub mod connection;
 pub mod gateway;
+pub mod notify;
 pub mod proto;
 pub mod transport_http;
 pub mod transport_stdio;

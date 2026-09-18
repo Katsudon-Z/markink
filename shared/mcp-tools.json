@@ -24,8 +24,24 @@
     "inputSchema": { "type": "object", "properties": {}, "required": [] }
   },
   {
+    "name": "get_version",
+    "description": "文書の版番号のみを返します。変更検知のポーリング用(軽量・全文なし)。前回確認した版と比べて変わっていたらget_changesで内容を取得してください。",
+    "inputSchema": { "type": "object", "properties": {}, "required": [] }
+  },
+  {
+    "name": "get_changes",
+    "description": "指定版以降の変更を取得します。変更がなければ{changed:false}のみを返します。変更があれば最新のMarkdown全文を返します。HTTP接続のAIはget_versionと併用してください。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "since": { "type": "integer", "description": "前回確認した版番号(省略時は全文を返す)" }
+      },
+      "required": []
+    }
+  },
+  {
     "name": "insert_text",
-    "description": "指定位置にMarkdown断片を挿入します。見出し・箇条書き・表・コードブロックなどもMarkdown記法でそのまま指定できます。適用後の範囲{from,to}を返すので、続けて編集する場合はその値を使ってください。",
+    "description": "指定位置にMarkdown断片を挿入します。見出し・箇条書き・表・コードブロックなどもMarkdown記法でそのまま指定できます。適用後の範囲{from,to}を返すので、続けて編集する場合はその値を使ってください。編集後、AIカーソルは編集箇所へ自動移動します。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -37,7 +53,7 @@
   },
   {
     "name": "replace_range",
-    "description": "指定範囲[from,to)をMarkdown断片で置換します。文書全体を覆う置換は人間の確認ダイアログが入ります。適用後の範囲{from,to}を返します。",
+    "description": "指定範囲[from,to)をMarkdown断片で置換します。文書全体を覆う置換は人間の確認ダイアログが入ります。適用後の範囲{from,to}を返します。編集後、AIカーソルは編集箇所へ自動移動します。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -50,7 +66,7 @@
   },
   {
     "name": "replace_all",
-    "description": "検索文字列をすべて置換します。置換件数{replaced}を返します。",
+    "description": "検索文字列をすべて置換します。置換件数{replaced}を返します。編集後、AIカーソルは最初の一致箇所へ自動移動します。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -63,7 +79,7 @@
   },
   {
     "name": "apply_markdown",
-    "description": "意味的な挿入位置(見出しの直下・文末・指定位置)にMarkdown断片を適用します。anchorには position / heading(見出しテキスト) / end:true のいずれか1つを指定します。適用後の範囲{from,to}を返します。",
+    "description": "意味的な挿入位置(見出しの直下・文末・指定位置)にMarkdown断片を適用します。anchorには position / heading(見出しテキスト) / end:true のいずれか1つを指定します。適用後の範囲{from,to}を返します。編集後、AIカーソルは編集箇所へ自動移動します。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -83,7 +99,7 @@
   },
   {
     "name": "set_heading",
-    "description": "指定位置を含むブロックを見出し(level 1-6)に設定します。level=0で通常の段落に戻します。",
+    "description": "指定位置を含むブロックを見出し(level 1-6)に設定します。level=0で通常の段落に戻します。実行後、AIカーソルは対象位置へ自動移動します。",
     "inputSchema": {
       "type": "object",
       "properties": {

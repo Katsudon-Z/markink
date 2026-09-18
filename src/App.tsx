@@ -5,6 +5,7 @@ import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
 import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
+import { bumpDocVersion } from './lib/mcp/docVersion';
 import { baseName, dirName, stem as stemOfPath } from './lib/path';
 import { ipc } from './lib/ipc';
 import { useAutosave } from './hooks/useAutosave';
@@ -12,12 +13,18 @@ import { useCollabSession } from './hooks/useCollabSession';
 import { useDocumentActions, useStartupFile, UNTITLED } from './hooks/useDocumentActions';
 import { useMcpBridge } from './hooks/useMcpBridge';
 import { AiSettingsPanel } from './components/AiSettingsPanel';
+import { SettingsPanel } from './components/SettingsPanel';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showAi, setShowAi] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [suggestedRoom, setSuggestedRoom] = useState<string | undefined>(undefined);
+  // 前回保存していない内容の復元機能 (既定: 無効)
+  const [restoreEnabled, setRestoreEnabled] = useState(false);
+  const restoreEnabledRef = useRef(false);
+  const getRestoreEnabled = useCallback(() => restoreEnabledRef.current, []);
 
   const viewRef = useRef<EditorView | null>(null);
   const dirRef = useRef<string | null>(null);
@@ -53,7 +60,45 @@ function App() {
     []
   );
 
-  const autosave = useAutosave({ getView, getRoomName, getDocPath });
+  const autosave = useAutosave({ getView, getRoomName, getDocPath, getRestoreEnabled });
+
+  // 復元機能の設定を読み込む。Editor の準備より遅れる場合があるため、
+  // 有効だった場合はここで復元候補を読み直す (handleReady 時の読み込みは無効扱いで素通りする)
+  // (autosave オブジェクトは毎レンダーで変わるため、安定な関数のみ依存する)
+  const { loadRestoreCandidate, clearRestoreCandidate } = autosave;
+  useEffect(() => {
+    let cancelled = false;
+    void ipc
+      .mcpGetSettings()
+      .then((s) => {
+        if (cancelled) return;
+        restoreEnabledRef.current = s.restoreEnabled;
+        setRestoreEnabled(s.restoreEnabled);
+        if (s.restoreEnabled) void loadRestoreCandidate();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [loadRestoreCandidate]);
+
+  // 復元機能の切り替え。無効化時は候補を破棄し、残っている自動保存データも消す
+  const handleRestoreEnabledChange = useCallback(
+    (enabled: boolean) => {
+      void (async () => {
+        await ipc.setRestoreEnabled(enabled);
+        restoreEnabledRef.current = enabled;
+        setRestoreEnabled(enabled);
+        if (!enabled) {
+          clearRestoreCandidate();
+          await ipc.deleteAutosave().catch(() => {});
+        } else {
+          await loadRestoreCandidate();
+        }
+      })().catch(() => window.alert('設定の保存に失敗しました'));
+    },
+    [clearRestoreCandidate, loadRestoreCandidate]
+  );
 
   // 共同編集 (セッションのライフサイクルと診断表示)
   const collab = useCollabSession({
@@ -249,6 +294,7 @@ function App() {
           <button className="btn" onClick={() => void doc.exportHtml()}>HTML出力</button>
           <button className="btn" onClick={() => setShowCollab((v) => !v)}>共同編集</button>
           <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
+          <button className="btn" onClick={() => setShowSettings((v) => !v)}>設定</button>
         </div>
       </header>
 
@@ -279,7 +325,9 @@ function App() {
             const view = viewRef.current;
             void collab.stopAndExtractMarkdown().then((markdown) => {
               if (view && markdown != null) {
+                // 結合結果で文書を置換するため、版を明示的に進める
                 view.updateState(createEditorState(markdown));
+                bumpDocVersion('human');
               }
             });
           }}
@@ -287,6 +335,14 @@ function App() {
       )}
 
       {showAi && <AiSettingsPanel onClose={() => setShowAi(false)} />}
+
+      {showSettings && (
+        <SettingsPanel
+          restoreEnabled={restoreEnabled}
+          onRestoreEnabledChange={handleRestoreEnabledChange}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
 
       <main className="app-main">
         <Editor

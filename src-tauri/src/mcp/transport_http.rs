@@ -277,9 +277,10 @@ async fn handle_http(
     if let Some(reason) = proto::initialize_rejection(&text, &replies) {
         notifier.rejected(&reason);
     }
-    // disconnect ツールで解放されたらセッションも捨てる
+    // disconnect ツールで解放されたらセッションも捨て、フロントへ通知する
     if was_connected && !slot.is_connected() {
         *session.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        notifier.disconnected();
     }
 
     if replies.is_empty() {
@@ -288,12 +289,16 @@ async fn handle_http(
     }
     let reply = replies.join("\n");
 
-    // initialize 成功時は新しいセッションIDを発行する
+    // initialize 成功時は新しいセッションIDを発行し、フロントへ接続を通知する
+    // (WS側と同様にAI名バッジ・AIカーソル・版通知の送り先が有効になる)
     let mut extra = Vec::new();
     if is_initialize_success(&text, &reply) {
         let id = settings::generate_token();
         extra.push((SESSION_HEADER, id.clone()));
         *session.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
+        if let Some(name) = slot.current_name() {
+            notifier.connected(&name);
+        }
     }
     respond_status(&mut writer, 200, "OK", &extra, reply.as_bytes()).await?;
     Ok(())
@@ -361,13 +366,19 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn spawn_test_server(token: &str) -> (u16, Arc<ConnectionSlot>) {
+        spawn_test_server_with(token, Arc::new(NoopNotifier)).await
+    }
+
+    async fn spawn_test_server_with(
+        token: &str,
+        notifier: Arc<dyn ConnNotifier>,
+    ) -> (u16, Arc<ConnectionSlot>) {
         let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         std_listener.set_nonblocking(true).unwrap();
         let port = std_listener.local_addr().unwrap().port();
         let gateway: Arc<dyn EditorGateway> = Arc::new(MockGateway { reply: json!({"ok": true}) });
         let slot = Arc::new(ConnectionSlot::new());
         let session: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
-        let notifier: Arc<dyn ConnNotifier> = Arc::new(NoopNotifier);
         let (stop_tx, _join) = spawn_server(
             std_listener,
             gateway,
@@ -379,6 +390,24 @@ mod tests {
         std::mem::forget(stop_tx);
         tokio::time::sleep(Duration::from_millis(100)).await;
         (port, slot)
+    }
+
+    /// 接続通知の記録用 (initialize/disconnect でフロント通知が出ることの検証)
+    #[derive(Default, Clone)]
+    struct RecNotifier {
+        events: Arc<StdMutex<Vec<String>>>,
+    }
+
+    impl ConnNotifier for RecNotifier {
+        fn connected(&self, name: &str) {
+            self.events.lock().unwrap().push(format!("connected:{}", name));
+        }
+        fn disconnected(&self) {
+            self.events.lock().unwrap().push("disconnected".to_string());
+        }
+        fn rejected(&self, reason: &str) {
+            self.events.lock().unwrap().push(format!("rejected:{}", reason));
+        }
     }
 
     struct HttpResponse {
@@ -508,6 +537,41 @@ mod tests {
         let ping = json!({ "jsonrpc": "2.0", "id": 3, "method": "ping" }).to_string();
         let resp = post(port, MCP_PATH, Some("tok"), Some(&session), &ping).await;
         assert_eq!(resp.status, 400);
+    }
+
+    #[tokio::test]
+    async fn http_initialize_and_disconnect_notify_frontend() {
+        let rec = Arc::new(RecNotifier::default());
+        let notifier: Arc<dyn ConnNotifier> = Arc::clone(&rec) as Arc<dyn ConnNotifier>;
+        let (port, _slot) = spawn_test_server_with("tok", notifier).await;
+        let init = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "clientInfo": { "name": "http-ai" } }
+        })
+        .to_string();
+        let resp = post(port, MCP_PATH, Some("tok"), None, &init).await;
+        assert_eq!(resp.status, 200);
+        let session = session_header(&resp).expect("セッション発行");
+        let events = rec.events.lock().unwrap().clone();
+        assert!(
+            events.iter().any(|e| e == "connected:AI: http-ai"),
+            "initialize成功で接続通知: {:?}",
+            events
+        );
+
+        let disc = json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": { "name": "disconnect", "arguments": {} }
+        })
+        .to_string();
+        let resp = post(port, MCP_PATH, Some("tok"), Some(&session), &disc).await;
+        assert_eq!(resp.status, 200);
+        let events = rec.events.lock().unwrap().clone();
+        assert!(
+            events.iter().any(|e| e == "disconnected"),
+            "disconnectで切断通知: {:?}",
+            events
+        );
     }
 
     #[tokio::test]

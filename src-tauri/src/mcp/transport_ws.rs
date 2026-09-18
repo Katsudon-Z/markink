@@ -20,6 +20,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::mcp::connection::{self, ConnectionSlot};
 use crate::mcp::gateway::{EditorGateway, TauriGateway};
+use crate::mcp::notify;
 use crate::mcp::proto::{self, ProtoContext};
 use crate::settings;
 
@@ -258,51 +259,76 @@ async fn handle_conn(
     let mut window_count: u32 = 0;
     // この接続が占有したAI名 (拒否された2本目が1本目の通知を消さないため)
     let mut owned_name: Option<String> = None;
+    // 文書変更の版通知 (フロント→Rust の mcp_doc_changed を購読)
+    let mut change_rx = notify::subscribe();
 
-    while let Some(msg) = source.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                if window_start.elapsed() > Duration::from_secs(1) {
-                    window_start = Instant::now();
-                    window_count = 0;
-                }
-                window_count += 1;
-                if window_count > MAX_REQUESTS_PER_SEC {
-                    let _ = sink
-                        .send(Message::Text(
-                            r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32003,"message":"レート制限を超えました"}}"#.into(),
-                        ))
-                        .await;
-                    break;
-                }
-                let was_connected = slot.is_connected();
-                let ctx = ProtoContext { connection: &slot, gateway: gateway.as_ref() };
-                let replies = proto::handle_line(text.as_str(), &ctx).await;
-                for reply in &replies {
-                    if sink.send(Message::Text(reply.clone().into())).await.is_err() {
-                        break;
+    loop {
+        tokio::select! {
+            msg = source.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        if window_start.elapsed() > Duration::from_secs(1) {
+                            window_start = Instant::now();
+                            window_count = 0;
+                        }
+                        window_count += 1;
+                        if window_count > MAX_REQUESTS_PER_SEC {
+                            let _ = sink
+                                .send(Message::Text(
+                                    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32003,"message":"レート制限を超えました"}}"#.into(),
+                                ))
+                                .await;
+                            break;
+                        }
+                        let was_connected = slot.is_connected();
+                        let ctx = ProtoContext { connection: &slot, gateway: gateway.as_ref() };
+                        let replies = proto::handle_line(text.as_str(), &ctx).await;
+                        let mut ended = false;
+                        for reply in &replies {
+                            if sink.send(Message::Text(reply.clone().into())).await.is_err() {
+                                ended = true;
+                                break;
+                            }
+                        }
+                        if ended {
+                            break;
+                        }
+                        // 満員拒否はUIに理由を通知する (requirements.md §10.1, §10.6)
+                        if let Some(reason) = proto::initialize_rejection(text.as_str(), &replies) {
+                            notifier.rejected(&reason);
+                        }
+                        // 接続確立・解放を遷移として検出し、フロントへ通知 (AI名バッジ表示)
+                        let now = slot.current_name();
+                        match (&owned_name, &now) {
+                            (None, Some(name)) if !was_connected => {
+                                owned_name = Some(name.clone());
+                                notifier.connected(name);
+                            }
+                            (Some(_), None) if was_connected => {
+                                owned_name = None;
+                                notifier.disconnected();
+                            }
+                            _ => {}
+                        }
                     }
-                }
-                // 満員拒否はUIに理由を通知する (requirements.md §10.1, §10.6)
-                if let Some(reason) = proto::initialize_rejection(text.as_str(), &replies) {
-                    notifier.rejected(&reason);
-                }
-                // 接続確立・解放を遷移として検出し、フロントへ通知 (AI名バッジ表示)
-                let now = slot.current_name();
-                match (&owned_name, &now) {
-                    (None, Some(name)) if !was_connected => {
-                        owned_name = Some(name.clone());
-                        notifier.connected(name);
-                    }
-                    (Some(_), None) if was_connected => {
-                        owned_name = None;
-                        notifier.disconnected();
-                    }
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                     _ => {}
                 }
             }
-            Ok(Message::Close(_)) | Err(_) => break,
-            _ => {}
+            // 文書変更の版通知を AI へ push (受信専聴のAIも生かすため touch する)
+            evt = change_rx.recv() => {
+                match evt {
+                    Ok(event) => {
+                        let line = notify::doc_changed_notification(&event);
+                        if sink.send(Message::Text(line.into())).await.is_err() {
+                            break;
+                        }
+                        slot.touch();
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(_) => break,
+                }
+            }
         }
     }
 
@@ -320,7 +346,7 @@ async fn handle_conn(
 mod tests {
     use super::*;
     use crate::mcp::gateway::MockGateway;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use tokio_tungstenite::connect_async;
 
     fn ws_url(port: u16, token: &str) -> String {
@@ -346,6 +372,26 @@ mod tests {
         port
     }
 
+    /// 応答IDが一致するまで読み進める (他テストの版通知が混ざっても壊れない)
+    async fn read_reply_with_id(
+        source: &mut (
+            impl futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+            + Unpin
+        ),
+        id: u64,
+    ) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(!deadline.saturating_duration_since(Instant::now()).is_zero(), "応答が届かない");
+            let msg = source.next().await.unwrap().unwrap();
+            let Message::Text(text) = msg else { continue };
+            let v: Value = serde_json::from_str(text.as_str()).unwrap();
+            if v.get("id").and_then(|i| i.as_u64()) == Some(id) {
+                return v;
+            }
+        }
+    }
+
     #[tokio::test]
     async fn ws_handshake_then_initialize_and_tool_call() {
         let port = spawn_test_server("tok").await;
@@ -357,9 +403,7 @@ mod tests {
             "params": { "clientInfo": { "name": "test-ai" } }
         });
         sink.send(Message::Text(init.to_string().into())).await.unwrap();
-        let reply = source.next().await.unwrap().unwrap();
-        let Message::Text(text) = reply else { panic!("text 以外"); };
-        let v: serde_json::Value = serde_json::from_str(text.as_str()).unwrap();
+        let v = read_reply_with_id(&mut source, 1).await;
         assert_eq!(v["result"]["serverInfo"]["name"], "MDNotepad");
 
         let call = json!({
@@ -367,10 +411,53 @@ mod tests {
             "params": { "name": "get_document", "arguments": {} }
         });
         sink.send(Message::Text(call.to_string().into())).await.unwrap();
-        let reply = source.next().await.unwrap().unwrap();
-        let Message::Text(text) = reply else { panic!("text 以外"); };
-        let v: serde_json::Value = serde_json::from_str(text.as_str()).unwrap();
+        let v = read_reply_with_id(&mut source, 2).await;
         assert!(v["result"]["content"][0]["text"].as_str().unwrap().contains("テスト"));
+    }
+
+    #[tokio::test]
+    async fn ws_pushes_doc_changed_notification() {
+        use crate::mcp::notify::{self, DocChangedEvent};
+        let port = spawn_test_server("tok").await;
+        let (ws, _) = connect_async(ws_url(port, "tok")).await.expect("ハンドシェイク成功");
+        let (mut sink, mut source) = ws.split();
+
+        let init = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "clientInfo": { "name": "push-ai" } }
+        });
+        sink.send(Message::Text(init.to_string().into())).await.unwrap();
+        let reply = source.next().await.unwrap().unwrap();
+        let Message::Text(text) = reply else { panic!("text 以外") };
+        let v: Value = serde_json::from_str(text.as_str()).unwrap();
+        assert!(v.get("result").is_some(), "initialize 成功");
+
+        // 文書変更を発行 → サーバからのpush通知が届く (id無し)
+        notify::publish(DocChangedEvent {
+            version: 424242,
+            origin: "human".to_string(),
+            cursor_from: Some(11),
+            cursor_to: Some(12),
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(!remaining.is_zero(), "版通知が届かない");
+            let msg = tokio::time::timeout(remaining, source.next())
+                .await
+                .expect("受信タイムアウト")
+                .unwrap()
+                .unwrap();
+            let Message::Text(text) = msg else { continue };
+            let v: Value = serde_json::from_str(text.as_str()).unwrap();
+            // 他テストの通知が混ざる可能性があるため版番号で選別する
+            if v.get("id").is_none() && v["params"]["version"] == 424242 {
+                assert_eq!(v["method"], "notifications/document/changed");
+                assert_eq!(v["params"]["origin"], "human");
+                assert_eq!(v["params"]["cursor"]["from"], 11);
+                return;
+            }
+        }
     }
 
     #[tokio::test]
@@ -419,9 +506,7 @@ mod tests {
             "params": { "clientInfo": { "name": "regression" } }
         });
         sink.send(Message::Text(init.to_string().into())).await.unwrap();
-        let reply = source.next().await.unwrap().unwrap();
-        let Message::Text(text) = reply else { panic!("text 以外"); };
-        let v: serde_json::Value = serde_json::from_str(text.as_str()).unwrap();
+        let v = read_reply_with_id(&mut source, 1).await;
         assert_eq!(v["result"]["serverInfo"]["name"], "MDNotepad");
     }
 }

@@ -18,11 +18,14 @@ pub struct Settings {
     pub mcp_token: Option<String>,
     /// AI編集時に自動保存を発火させるか (requirements.md §10.5)
     pub ai_auto_save: bool,
+    /// 前回保存していない内容の復元機能を使うか。既定は無効 (OFF)。
+    /// 無効時は自動保存の書き込みも復元提案も行わない。
+    pub restore_enabled: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { mcp_enabled: false, mcp_token: None, ai_auto_save: true }
+        Self { mcp_enabled: false, mcp_token: None, ai_auto_save: true, restore_enabled: false }
     }
 }
 
@@ -105,6 +108,13 @@ pub fn mcp_get_settings() -> Settings {
     load()
 }
 
+#[tauri::command]
+pub fn set_restore_enabled(enabled: bool) -> Result<(), String> {
+    let mut s: Settings = load();
+    s.restore_enabled = enabled;
+    save(&s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,8 +139,19 @@ mod tests {
     }
 
     #[test]
-    fn token_is_random_hex() {
-        let t1 = generate_token();
+    fn restore_defaults_off_for_old_files() {
+        // 復元機能は既定で無効。旧設定ファイルに項目が無くても false になる
+        assert!(!Settings::default().restore_enabled);
+        let parsed: Settings = serde_json::from_str(r#"{"mcpEnabled":true}"#).unwrap();
+        assert!(parsed.mcp_enabled);
+        assert!(!parsed.restore_enabled);
+        let enabled: Settings =
+            serde_json::from_str(r#"{"restoreEnabled":true}"#).unwrap();
+        assert!(enabled.restore_enabled);
+    }
+
+    #[test]
+    fn token_is_random_hex() {        let t1 = generate_token();
         let t2 = generate_token();
         assert_eq!(t1.len(), 32);
         assert!(t1.chars().all(|c| c.is_ascii_hexdigit()));

@@ -12,6 +12,8 @@ export interface McpSettings {
   mcpEnabled: boolean;
   mcpToken: string | null;
   aiAutoSave: boolean;
+  /** 前回保存していない内容の復元機能を使うか (既定: 無効) */
+  restoreEnabled: boolean;
 }
 
 /** AI共同編集 (MCP) の実行状態 */
@@ -60,6 +62,8 @@ export const ipc = {
   takeStartupFile: () => invoke<string | null>('take_startup_file'),
 
   mcpGetSettings: () => invoke<McpSettings>('mcp_get_settings'),
+  setRestoreEnabled: (enabled: boolean) =>
+    invoke<void>('set_restore_enabled', { enabled }),
   mcpAutostart: () => invoke<McpStatus>('mcp_autostart'),
   mcpSetEnabled: (enabled: boolean) => invoke<McpStatus>('mcp_set_enabled', { enabled }),
   mcpRegenerateToken: () => invoke<string>('mcp_regenerate_token'),
@@ -69,5 +73,20 @@ export const ipc = {
   mcpSetAiAutoSave: (enabled: boolean) => invoke<void>('mcp_set_ai_auto_save', { enabled }),
   mcpExePath: () => invoke<string>('mcp_exe_path'),
   mcpResponse: (id: number, ok: boolean, data: unknown, error: string | null) =>
-    invoke<void>('mcp_response', { id, ok, data, error })
+    invoke<void>('mcp_response', { id, ok, data, error }),
+  /** 文書変更の版通知 (Rust が AI へ転送する。デバウンス済みで呼ぶ) */
+  // 注意: Tauri v2 のコマンド引数は JS 側 camelCase で送る
+  // (docDir/fileName と同じ約束。snake_case では missing key 扱いになる)
+  mcpDocChanged: (
+    version: number,
+    origin: string,
+    cursorFrom: number | null,
+    cursorTo: number | null
+  ) =>
+    invoke<void>('mcp_doc_changed', {
+      version,
+      origin,
+      cursorFrom,
+      cursorTo
+    })
 };

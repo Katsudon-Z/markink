@@ -55,6 +55,7 @@ pub fn run() {
             collab_release_signal,
             // AI共同編集 (MCP)
             settings::mcp_get_settings,
+            settings::set_restore_enabled,
             mcp::mcp_autostart,
             mcp::mcp_set_enabled,
             mcp::mcp_regenerate_token,
@@ -63,6 +64,7 @@ pub fn run() {
             mcp::mcp_get_ai_auto_save,
             mcp::mcp_set_ai_auto_save,
             mcp::mcp_exe_path,
+            mcp::notify::mcp_doc_changed,
             mcp::gateway::mcp_response
         ])
         .run(tauri::generate_context!())

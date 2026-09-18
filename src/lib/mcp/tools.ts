@@ -6,6 +6,7 @@ import type { Transaction } from 'prosemirror-state';
 import { markdownParser, markdownSerializer } from '../prosemirror/editor';
 import manifest from '../../../shared/mcp-tools.json';
 import { getOutline, searchDocument, MAX_DOCUMENT_CHARS } from './document';
+import { AI_TR_META, getDocVersion } from './docVersion';
 import { getAiCursor, setAiCursor, refreshAiCursor, scrollViewToCursor } from './presence';
 import type { ToolContext, ToolHandler, ToolResult } from './types';
 
@@ -44,6 +45,21 @@ function assertPosition(doc: PMNode, pos: number, name: string): void {
 function asString(value: unknown, name: string): string {
   if (typeof value !== 'string') throw new Error(`${name} は文字列で指定してください`);
   return value;
+}
+
+/** AI発のトランザクションであることを版管理に伝える */
+function tagAi(tr: Transaction): Transaction {
+  return tr.setMeta(AI_TR_META, true);
+}
+
+/**
+ * AIの書き込み箇所にAIカーソルを表示する (AIの作業位置を常に可視化する)。
+ * 人間の selection は動かさない。画面スクロールは行わない
+ * (連続書き込みで人間の閲覧位置を奪わないため)。
+ */
+function showAiCursorAt(view: EditorView, from: number, to: number): void {
+  setAiCursor({ from, to });
+  refreshAiCursor(view);
 }
 
 /** 人間の IME 変換中はトランザクション適用を少し待つ (変換の破壊を避ける) */
@@ -159,6 +175,7 @@ const handlers: Record<string, ToolHandler> = {
       title: ctx.getTitle(),
       path: ctx.getPath(),
       dirty: ctx.isDirty(),
+      version: getDocVersion(),
       markdown: truncated ? markdown.slice(0, MAX_DOCUMENT_CHARS) : markdown,
       truncated
     };
@@ -180,6 +197,26 @@ const handlers: Record<string, ToolHandler> = {
   get_outline(_args, ctx): ToolResult {
     const view = requireView(ctx);
     return { headings: getOutline(view.state.doc) };
+  },
+
+  get_version(): ToolResult {
+    // 版番号のみの軽量呼び出し (変更検知ポーリング用。エディタ不要)
+    return { version: getDocVersion() };
+  },
+
+  get_changes(args, ctx): ToolResult {
+    const view = requireView(ctx);
+    const current = getDocVersion();
+    const since = args.since === undefined ? -1 : asInteger(args.since, 'since');
+    if (since >= current) return { version: current, changed: false };
+    const markdown = markdownSerializer.serialize(view.state.doc);
+    const truncated = markdown.length > MAX_DOCUMENT_CHARS;
+    return {
+      version: current,
+      changed: true,
+      markdown: truncated ? markdown.slice(0, MAX_DOCUMENT_CHARS) : markdown,
+      truncated
+    };
   },
 
   get_cursor(_args, ctx): ToolResult {
@@ -211,7 +248,8 @@ const handlers: Record<string, ToolHandler> = {
     const fragment = parseFragment(markdown);
     if (fragment.size === 0) throw new Error('挿入内容が空です');
     const applied = applyInsert(view.state.tr, position, fragment);
-    view.dispatch(applied.tr.scrollIntoView());
+    view.dispatch(tagAi(applied.tr).scrollIntoView());
+    showAiCursorAt(view, applied.from, applied.to);
     return { from: applied.from, to: applied.to };
   },
 
@@ -233,11 +271,13 @@ const handlers: Record<string, ToolHandler> = {
     }
     const fragment = parseFragment(markdown);
     if (fragment.size === 0) {
-      view.dispatch(view.state.tr.delete(from, to).scrollIntoView());
+      view.dispatch(tagAi(view.state.tr.delete(from, to)).scrollIntoView());
+      showAiCursorAt(view, from, from);
       return { from, to: from };
     }
     const applied = applyInsert(view.state.tr.delete(from, to), from, fragment);
-    view.dispatch(applied.tr.scrollIntoView());
+    view.dispatch(tagAi(applied.tr).scrollIntoView());
+    showAiCursorAt(view, applied.from, applied.to);
     return { from: applied.from, to: applied.to };
   },
 
@@ -258,7 +298,9 @@ const handlers: Record<string, ToolHandler> = {
       const m = matches[i];
       tr = tr.insertText(replacement, m.from, m.to);
     }
-    view.dispatch(tr.scrollIntoView());
+    view.dispatch(tagAi(tr).scrollIntoView());
+    // 後ろから適用するため先頭の一致位置は有効なまま。そこにカーソルを置く
+    if (matches.length > 0) showAiCursorAt(view, matches[0].from, matches[0].from);
     return { replaced: matches.length };
   },
 
@@ -287,7 +329,8 @@ const handlers: Record<string, ToolHandler> = {
       throw new Error('anchor は {position} / {heading} / {end:true} のいずれかで指定してください');
     }
     const applied = applyInsert(view.state.tr, pos, fragment);
-    view.dispatch(applied.tr.scrollIntoView());
+    view.dispatch(tagAi(applied.tr).scrollIntoView());
+    showAiCursorAt(view, applied.from, applied.to);
     return { from: applied.from, to: applied.to };
   },
 
@@ -307,10 +350,11 @@ const handlers: Record<string, ToolHandler> = {
     const cmd = level === 0 ? setBlockType(paragraph) : setBlockType(heading, { level });
     let applied = false;
     cmd(view.state, (tr) => {
-      view.dispatch(tr.scrollIntoView());
+      view.dispatch(tagAi(tr).scrollIntoView());
       applied = true;
     });
     if (!applied) throw new Error('見出しを設定できませんでした');
+    showAiCursorAt(view, position, position);
     return { ok: true, level };
   },
 

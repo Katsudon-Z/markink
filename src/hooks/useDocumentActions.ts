@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorView } from 'prosemirror-view';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { createEditorState } from '../lib/prosemirror/editor';
+import { bumpDocVersion } from '../lib/mcp/docVersion';
 import { documentToHtml } from '../lib/markdown/htmlExport';
 import { ipc } from '../lib/ipc';
 import { baseName, dirName, stem } from '../lib/path';
@@ -46,7 +47,9 @@ export function useDocumentActions({
     (content: string, nextTitle: string, nextPath: string | null) => {
       const view = getView();
       if (!view) return;
+      // updateState は dispatch を経由しないため、版を明示的に進める
       view.updateState(createEditorState(content));
+      bumpDocVersion('human');
       adopt(nextPath, nextTitle, dirName(nextPath));
     },
     [getView, adopt]
