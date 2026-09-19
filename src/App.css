@@ -45,6 +45,59 @@ html, body {
   gap: 8px;
 }
 
+/* 画面右上の状態表示 (共同編集中・AI編集中を目立たせる) */
+.app-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.app-status-badge::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.app-status-badge.collab {
+  background: #e6f4ea;
+  color: #1a7f37;
+  border: 1px solid #b7dfc3;
+}
+
+.app-status-badge.ai {
+  background: #7c3aed;
+  color: #fff;
+  border: 1px solid #6d28d9;
+}
+
+/* AI処理中はドットを点滅させて目立たせる */
+.app-status-badge.processing::before {
+  animation: app-status-pulse 1s ease-in-out infinite;
+}
+
+@keyframes app-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
 .btn {
   padding: 6px 12px;
   background: white;
@@ -73,6 +126,67 @@ html, body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: row;
+}
+
+.app-main .editor-container {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 右ペイン (目次・参加者) */
+.right-pane {
+  flex: 0 0 260px;
+  border-left: 1px solid #ddd;
+  background: #fafafa;
+  overflow-y: auto;
+  padding: 12px;
+  font-size: 13px;
+}
+
+.right-pane h3 {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.right-pane ul.toc {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+}
+
+.right-pane .toc-item button {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #333;
+}
+
+.right-pane .toc-item button:hover {
+  background: #e9e9e9;
+}
+
+.right-pane ul.peers {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+}
+
+.right-pane ul.peers li {
+  padding: 2px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 復元提案ダイアログ (requirements.md:48) */
@@ -302,4 +416,32 @@ html, body {
 }
 .ai-result-pre {
   max-height: 20em;
+}
+
+/* 設定内のショートカットキー一覧 */
+.ai-shortcut-list {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: #f7f7f7;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.ai-shortcut-list ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 4px 0 8px;
+}
+
+.ai-shortcut-list li {
+  padding: 2px 0;
+}
+
+.ai-shortcut-list code {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 0 6px;
+  font-size: 12px;
 }

@@ -19,18 +19,23 @@ export function insertAiMarkdown(view: EditorView, pos: number, markdown: string
   const doc = view.state.doc;
   const $pos = doc.resolve(at);
   let tr = view.state.tr;
+  let inserted = 0;
   if (
     fragment.childCount === 1 &&
     fragment.firstChild?.type.name === 'paragraph' &&
     $pos.parent.isTextblock
   ) {
     const text = fragment.firstChild.textContent;
-    tr = text ? tr.insertText(text, at) : tr;
+    if (text) {
+      tr = tr.insertText(text, at);
+      inserted = text.length;
+    }
   } else {
     tr = tr.insert(at, fragment);
+    inserted = fragment.size;
   }
   view.dispatch(tr.setMeta(AI_TR_META, true).scrollIntoView());
-  const end = clampPos(view, at + fragment.size);
+  const end = clampPos(view, at + inserted);
   setAiCursor({ from: at, to: end });
   refreshAiCursor(view);
 }

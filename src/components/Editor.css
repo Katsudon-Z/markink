@@ -16,6 +16,37 @@
   font-size: 14px;
   line-height: 1.6;
   outline: none;
+  position: relative;
+}
+
+/* 行番号ガター表示時は左に余白を確保する */
+.editor.with-line-numbers {
+  padding-left: 8px;
+}
+
+.editor.with-line-numbers .ProseMirror {
+  padding-left: 48px;
+}
+
+.line-numbers-gutter {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.line-number {
+  position: absolute;
+  left: 0;
+  width: 40px;
+  padding-right: 8px;
+  box-sizing: border-box;
+  text-align: right;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #bbb;
 }
 
 .editor .ProseMirror {
@@ -107,6 +138,18 @@
 /* AIカーソルの選択範囲 (薄い紫) */
 .mdn-ai-selection {
   background: rgba(124, 58, 237, 0.15);
+}
+
+/* 共同編集での他者の修正箇所 (薄い色 → 10秒で透明に) */
+.mdn-remote-change {
+  border-radius: 2px;
+  animation: mdn-remote-fade 10s ease-out forwards;
+}
+
+@keyframes mdn-remote-fade {
+  to {
+    background-color: transparent;
+  }
 }
 
 /* ProseMirror 基本スタイル */

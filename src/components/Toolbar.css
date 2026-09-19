@@ -53,3 +53,25 @@
   font-size: 13px;
   min-width: 220px;
 }
+
+/* その他メニュー (H4/H5 など、使用頻度の低い書式) */
+.toolbar-other {
+  position: relative;
+  display: inline-flex;
+}
+
+.toolbar-other-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 96px;
+}

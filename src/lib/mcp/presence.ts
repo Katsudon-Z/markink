@@ -34,6 +34,15 @@ export function setAiCursor(cursor: AiCursor | null): void {
   mirrorToAwareness();
 }
 
+/**
+ * 追従用: module状態だけ更新し、Awarenessへの反映はしない。
+ * 人間の毎打鍵で broadcast→再描画のループが回るのを避けるため。
+ * 明示的な設定 (AIの書き込み・カーソルAPI・切断) は setAiCursor を使う。
+ */
+function setAiCursorSilent(cursor: AiCursor | null): void {
+  aiCursor = cursor;
+}
+
 export function getAiCursor(): AiCursor | null {
   return aiCursor;
 }
@@ -106,6 +115,28 @@ function buildAiCursorElement(name: string): HTMLElement {
  */
 export function aiCursorPlugin(getAwareness: () => AwarenessLike | null): Plugin {
   return new Plugin({
+    appendTransaction(trs) {
+      // 人間 (や他者) の編集で文書が変わったら、AIカーソルを同じ文字に追従させる。
+      // mapping で写像し直す (削除で消えた場合は削除点に畳まれる)。
+      // Awarenessへの反映はしない (毎打鍵の broadcast→参加者更新→再dispatch の
+      // ループで入力・スクロールが重くなるため)。明示的な setAiCursor 時のみ反映する。
+      // dispatch は行わず、module 状態だけ更新する (装飾は同一サイクルで再計算される)。
+      const cur = getAiCursor();
+      if (!cur) return undefined;
+      let from = cur.from;
+      let to = cur.to;
+      let moved = false;
+      for (const tr of trs) {
+        if (!tr.docChanged) continue;
+        const nf = tr.mapping.map(from, 1);
+        const nt = tr.mapping.map(to, 1);
+        if (nf !== from || nt !== to) moved = true;
+        from = nf;
+        to = nt;
+      }
+      if (moved) setAiCursorSilent({ from, to });
+      return undefined;
+    },
     props: {
       decorations(state): DecorationSet | null {
         const decos: Decoration[] = [];
@@ -115,8 +146,10 @@ export function aiCursorPlugin(getAwareness: () => AwarenessLike | null): Plugin
         if (local && name) {
           try {
             const from = clampPos(docSize, local.from);
-            decos.push(Decoration.widget(from, () => buildAiCursorElement(name), { side: -1 }));
             const to = clampPos(docSize, local.to);
+            // キャレット (名前ラベル) は範囲の末尾に置く (AI出力の最後を示す)。
+            // 範囲選択 (from→to) はそのまま残す。
+            decos.push(Decoration.widget(to, () => buildAiCursorElement(name), { side: 1 }));
             if (to > from) {
               decos.push(
                 Decoration.inline(from, to, { class: 'mdn-ai-selection' })
@@ -136,8 +169,8 @@ export function aiCursorPlugin(getAwareness: () => AwarenessLike | null): Plugin
               const from = clampPos(docSize, remote.anchor);
               const to = clampPos(docSize, typeof remote.head === 'number' ? remote.head : remote.anchor);
               decos.push(
-                Decoration.widget(from, () => buildAiCursorElement(String(remote.name ?? 'AI')), {
-                  side: -1
+                Decoration.widget(to, () => buildAiCursorElement(String(remote.name ?? 'AI')), {
+                  side: 1
                 })
               );
               if (to > from) {

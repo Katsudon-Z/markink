@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FORMATS } from '../lib/prosemirror/commands';
 import './Toolbar.css';
 
@@ -16,6 +16,25 @@ export const Toolbar = React.memo(function Toolbar({
 }: ToolbarProps) {
   const [linkInputShown, setLinkInputShown] = useState(false);
   const [href, setHref] = useState('');
+  const [otherOpen, setOtherOpen] = useState(false);
+  const otherRef = useRef<HTMLSpanElement>(null);
+
+  // その他メニューは外側クリック・Escape で閉じる
+  useEffect(() => {
+    if (!otherOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (otherRef.current && !otherRef.current.contains(e.target as Node)) setOtherOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOtherOpen(false);
+    };
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [otherOpen]);
 
   const handleApplyLink = () => {
     onFormat('link', { href: href.trim() });
@@ -23,9 +42,12 @@ export const Toolbar = React.memo(function Toolbar({
     setLinkInputShown(false);
   };
 
+  const mainFormats = FORMATS.filter((tool) => tool.inToolbar !== false);
+  const otherFormats = FORMATS.filter((tool) => tool.inToolbar === false);
+
   return (
     <div className="toolbar">
-      {FORMATS.map((tool) => (
+      {mainFormats.map((tool) => (
         <button
           key={tool.id}
           className="toolbar-button"
@@ -36,6 +58,38 @@ export const Toolbar = React.memo(function Toolbar({
           {tool.label}
         </button>
       ))}
+
+      {otherFormats.length > 0 && (
+        <span ref={otherRef} className="toolbar-other">
+          <button
+            className="toolbar-button"
+            title="その他の書式"
+            aria-haspopup="menu"
+            aria-expanded={otherOpen}
+            onClick={() => setOtherOpen((v) => !v)}
+          >
+            その他 ▾
+          </button>
+          {otherOpen && (
+            <span className="toolbar-other-menu" role="menu">
+              {otherFormats.map((tool) => (
+                <button
+                  key={tool.id}
+                  className="toolbar-button"
+                  title={tool.title}
+                  aria-label={tool.title}
+                  onClick={() => {
+                    onFormat(tool.id);
+                    setOtherOpen(false);
+                  }}
+                >
+                  {tool.label}
+                </button>
+              ))}
+            </span>
+          )}
+        </span>
+      )}
 
       <button
         className={showComments ? 'toolbar-button toolbar-button-active' : 'toolbar-button'}

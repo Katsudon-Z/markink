@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorView } from 'prosemirror-view';
 import type { CollabSession, PeerInfo } from '../lib/collaboration/session';
 import { loadCollabModules, type CollabModules } from '../lib/collaboration/load';
+import { clearRemoteHighlights } from '../lib/collaboration/remoteHighlight';
 import { ipc, type RelayStats } from '../lib/ipc';
 import { attachAwareness, refreshAiCursor } from '../lib/mcp/presence';
 
@@ -58,6 +59,8 @@ export function formatSyncLabel(diag: CollabDiagnostics): string {
 interface UseCollabSessionOptions {
   getView: () => EditorView | null;
   getDocDir: () => string | null;
+  /** 共同編集で表示する自分の名前 (設定値。空なら自動生成) */
+  getUserName?: () => string;
   /** Yjs 文書が変化したとき (自動保存の契機) */
   onDocumentChanged?: () => void;
 }
@@ -65,6 +68,7 @@ interface UseCollabSessionOptions {
 export function useCollabSession({
   getView,
   getDocDir,
+  getUserName,
   onDocumentChanged
 }: UseCollabSessionOptions) {
   const [active, setActive] = useState(false);
@@ -85,6 +89,8 @@ export function useCollabSession({
 
   const onDocumentChangedRef = useRef(onDocumentChanged);
   onDocumentChangedRef.current = onDocumentChanged;
+  const getUserNameRef = useRef(getUserName);
+  getUserNameRef.current = getUserName;
   const showCursorsRef = useRef(showCursors);
   showCursorsRef.current = showCursors;
 
@@ -109,6 +115,7 @@ export function useCollabSession({
     sessionRef.current = null;
     // AIプレゼンスの Awareness 連携を外す (ローカル装飾は維持)
     attachAwareness(null);
+    clearRemoteHighlights();
     void ipc.releaseSignal().catch(() => {});
     modulesRef.current?.session.stopCollabSession(session);
     updateCountRef.current = 0;
@@ -142,7 +149,11 @@ export function useCollabSession({
         if (seedIfHost) shouldSeed = info.role === 'host';
       }
 
-      const session = modules.session.startCollabSession({ roomName: room, signalingUrl: url });
+      const session = modules.session.startCollabSession({
+        roomName: room,
+        signalingUrl: url,
+        userName: getUserNameRef.current?.() || undefined
+      });
       sessionRef.current = session;
       // AIプレゼンスを Awareness に接続 (人間の user フィールドは触らない)
       attachAwareness(session.awareness);

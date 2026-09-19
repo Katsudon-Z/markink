@@ -4,6 +4,7 @@ import { schema } from './schema';
 import { markdownSerializer } from './markdown';
 import { createBasePlugins } from './plugins';
 import { ySyncPlugin, yCursorPlugin, prosemirrorToYXmlFragment, yXmlFragmentToProsemirror } from 'y-prosemirror';
+import { remoteHighlightPlugin } from '../collaboration/remoteHighlight';
 
 // y-prosemirror による Yjs ↔ ProseMirror 連携 (requirements.md:110)
 
@@ -40,7 +41,9 @@ export function createCollabPlugins(
 ): Plugin[] {
   const plugins: Plugin[] = [
     ySyncPlugin(session.fragment),
-    ...createBasePlugins({ historyMode: 'collab' })
+    ...createBasePlugins({ historyMode: 'collab' }),
+    // 他者の編集箇所のハイライト (3秒で消える)
+    remoteHighlightPlugin()
   ];
   if (options.showCursors !== false) {
     plugins.splice(1, 0, yCursorPlugin(session.awareness, { cursorBuilder: collabCursorBuilder }));

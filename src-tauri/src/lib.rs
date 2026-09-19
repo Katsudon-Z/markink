@@ -57,6 +57,9 @@ pub fn run() {
             // AI共同編集 (MCP)
             settings::mcp_get_settings,
             settings::set_restore_enabled,
+            settings::set_user_name,
+            settings::set_line_numbers,
+            settings::set_editor_font,
             mcp::mcp_autostart,
             mcp::mcp_set_enabled,
             mcp::mcp_regenerate_token,

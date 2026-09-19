@@ -16,10 +16,26 @@ export interface McpSettings {
   restoreEnabled: boolean;
   /** エディタ起点のAI呼び出しを使うか (既定: 無効) */
   aiCallEnabled: boolean;
-  /** serve に渡すモデル (空なら serve 側の既定) */
+  /** 共同編集で表示する自分の名前 (空なら自動生成) */
+  userName: string;
+  /** 行番号ガターを表示するか */
+  lineNumbers: boolean;
+  /** エディタの文字サイズ (px) */
+  fontSize: number;
+  /** エディタのフォントファミリ (CSS値。空なら既定) */
+  fontFamily: string;
+  /** AI呼び出しの提供方式: "local" | "api" */
+  aiProvider: string;
+  /** serve に渡すモデル (local 時) */
   aiModel: string;
-  /** serve のURL (localhost のみ) */
+  /** serve のURL (local 時・localhost のみ) */
   aiBackendUrl: string;
+  /** OpenAI互換APIのエンドポイント (api 時) */
+  aiApiUrl: string;
+  /** APIキー (api 時) */
+  aiApiKey: string;
+  /** APIのモデル名 (api 時) */
+  aiApiModel: string;
   aiTimeoutSecs: number;
   aiMaxChars: number;
 }
@@ -72,6 +88,10 @@ export const ipc = {
   mcpGetSettings: () => invoke<McpSettings>('mcp_get_settings'),
   setRestoreEnabled: (enabled: boolean) =>
     invoke<void>('set_restore_enabled', { enabled }),
+  setUserName: (name: string) => invoke<void>('set_user_name', { name }),
+  setLineNumbers: (enabled: boolean) => invoke<void>('set_line_numbers', { enabled }),
+  setEditorFont: (font: { sizePx?: number; family?: string }) =>
+    invoke<void>('set_editor_font', { font }),
   mcpAutostart: () => invoke<McpStatus>('mcp_autostart'),
   mcpSetEnabled: (enabled: boolean) => invoke<McpStatus>('mcp_set_enabled', { enabled }),
   mcpRegenerateToken: () => invoke<string>('mcp_regenerate_token'),
@@ -103,8 +123,12 @@ export const ipc = {
   aiStatus: () => invoke<AiServeStatus>('ai_status'),
   aiSetEnabled: (enabled: boolean) => invoke<AiServeStatus>('ai_set_enabled', { enabled }),
   aiSetConfig: (config: {
+    provider?: string;
     model?: string;
     backendUrl?: string;
+    apiUrl?: string;
+    apiKey?: string;
+    apiModel?: string;
     maxChars?: number;
     timeoutSecs?: number;
     opencodeBin?: string;

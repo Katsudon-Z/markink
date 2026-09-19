@@ -6,18 +6,20 @@ import { CollaborationPanel } from './components/CollaborationPanel';
 import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
 import { bumpDocVersion } from './lib/mcp/docVersion';
+import { AI_CURSOR_COLOR } from './lib/mcp/presence';
 import { baseName, dirName, stem as stemOfPath } from './lib/path';
-import { ipc, type AiModeId } from './lib/ipc';
+import { ipc } from './lib/ipc';
 import { useAutosave } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
 import { useDocumentActions, useStartupFile, UNTITLED } from './hooks/useDocumentActions';
 import { useMcpBridge } from './hooks/useMcpBridge';
+import { useAiCall } from './hooks/useAiCall';
 import { AiSettingsPanel } from './components/AiSettingsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { AiContextMenu } from './components/AiContextMenu';
 import { AiResultDialog } from './components/AiResultDialog';
-import { buildAiContext, aiModeLabel } from './lib/ai/context';
-import { insertAiMarkdown, replaceAiRange } from './lib/ai/applyResult';
+import { RightPane } from './components/RightPane';
+import { aiModeLabel } from './lib/ai/context';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
@@ -29,6 +31,14 @@ function App() {
   const [restoreEnabled, setRestoreEnabled] = useState(false);
   const restoreEnabledRef = useRef(false);
   const getRestoreEnabled = useCallback(() => restoreEnabledRef.current, []);
+  // 共同編集で表示する自分の名前 (設定値。空なら自動生成)
+  const userNameRef = useRef('');
+  const getUserName = useCallback(() => userNameRef.current, []);
+  // 行番号ガターの表示 (設定値。既定は表示)
+  const [showLineNumbers, setShowLineNumbers] = useState(true);
+  // エディタの文字サイズ・種類 (設定値)
+  const [fontSizePx, setFontSizePx] = useState(14);
+  const [fontFamily, setFontFamily] = useState('');
 
   const viewRef = useRef<EditorView | null>(null);
   const dirRef = useRef<string | null>(null);
@@ -78,6 +88,10 @@ function App() {
         if (cancelled) return;
         restoreEnabledRef.current = s.restoreEnabled;
         setRestoreEnabled(s.restoreEnabled);
+        userNameRef.current = s.userName ?? '';
+        setShowLineNumbers(s.lineNumbers ?? true);
+        if (Number.isFinite(s.fontSize) && s.fontSize > 0) setFontSizePx(s.fontSize);
+        setFontFamily(s.fontFamily ?? '');
         if (s.restoreEnabled) void loadRestoreCandidate();
       })
       .catch(() => {});
@@ -104,13 +118,63 @@ function App() {
     [clearRestoreCandidate, loadRestoreCandidate]
   );
 
+  // 自分の名前の変更 (設定パネルから。ref を先に更新して次の共同編集開始に反映)
+  const handleUserNameChange = useCallback((name: string) => {
+    userNameRef.current = name.trim();
+  }, []);
+
+  // 行番号表示の切り替え
+  const handleLineNumbersChange = useCallback((enabled: boolean) => {
+    void (async () => {
+      await ipc.setLineNumbers(enabled);
+      setShowLineNumbers(enabled);
+    })().catch(() => window.alert('設定の保存に失敗しました'));
+  }, []);
+
+  // エディタの文字サイズ・種類の変更
+  const handleEditorFontChange = useCallback((patch: { sizePx?: number; family?: string }) => {
+    void (async () => {
+      await ipc.setEditorFont(patch);
+      if (patch.sizePx != null) setFontSizePx(patch.sizePx);
+      if (patch.family != null) setFontFamily(patch.family);
+    })().catch(() => window.alert('設定の保存に失敗しました'));
+  }, []);
+
+  // Ctrl+S で上書き保存 (ブラウザ既定の保存ダイアログを抑止。IME変換中は除く)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.code === 'KeyS' &&
+        !e.repeat &&
+        !e.isComposing
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        docRef.current?.saveCurrent(autosave.discardServerAutosave);
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [autosave.discardServerAutosave]);
+
   // 共同編集 (セッションのライフサイクルと診断表示)
   const collab = useCollabSession({
     getView,
     getDocDir,
+    getUserName,
     onDocumentChanged: autosave.markDirty
   });
   collabRef.current = collab;
+
+  // 共同編集が始まったら上部の共同編集パネルを自動で閉じる (状態は右端バッジで示す)
+  const collabActiveRef = useRef(false);
+  useEffect(() => {
+    if (collab.active && !collabActiveRef.current) setShowCollab(false);
+    collabActiveRef.current = collab.active;
+  }, [collab.active]);
 
   // 文書操作 (新規/開く/保存/HTML出力/起動引数)
   const docRef = useRef<ReturnType<typeof useDocumentActions> | null>(null);
@@ -197,139 +261,30 @@ function App() {
   );
 
   // ---- エディタ起点のAI呼び出し (右クリックメニュー → 結果ダイアログ) ----
-  const [aiMenu, setAiMenu] = useState<{ x: number; y: number } | null>(null);
-  const [aiEnabled, setAiEnabled] = useState(false);
-  const [aiRun, setAiRun] = useState<{
-    mode: AiModeId;
-    selFrom: number;
-    selTo: number;
-    cursorPos: number;
-    hasSelection: boolean;
-    text: string;
-    error: string | null;
-  } | null>(null);
-  const [aiBusy, setAiBusy] = useState<{ mode: AiModeId; startedAt: number } | null>(null);
-  const [aiElapsed, setAiElapsed] = useState(0);
-
-  // アプリ起動時にAIサーバを自動開始 (有効時のみ)
-  useEffect(() => {
-    void ipc
-      .aiAutostart()
-      .then((st) => setAiEnabled(st.enabled))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!aiBusy) {
-      setAiElapsed(0);
-      return;
-    }
-    setAiElapsed(0);
-    const timer = window.setInterval(
-      () => setAiElapsed(Math.floor((Date.now() - aiBusy.startedAt) / 1000)),
-      500
-    );
-    return () => window.clearInterval(timer);
-  }, [aiBusy]);
-
-  const handleEditorContextMenu = useCallback(
-    (e: React.MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target?.closest?.('.ProseMirror')) return;
-      e.preventDefault();
-      void ipc
-        .mcpGetSettings()
-        .then((s) => setAiEnabled(s.aiCallEnabled))
-        .catch(() => {});
-      setAiMenu({ x: e.clientX, y: e.clientY });
-    },
-    []
-  );
-
-  const executeAi = useCallback(
-    (mode: AiModeId, prompt: string) => {
-      const view = viewRef.current;
-      if (!view) {
-        notifyMcpHuman('エディタが準備できていません');
-        return;
-      }
-      if ((mode === 'question' || mode === 'edit') && !prompt.trim()) {
-        notifyMcpHuman('指示・質問を入力してください');
-        return;
-      }
-      let built;
-      try {
-        built = buildAiContext(view, mode, 8000);
-      } catch (err) {
-        notifyMcpHuman(err instanceof Error ? err.message : String(err));
-        return;
-      }
-      if (!built.context.trim()) {
-        notifyMcpHuman('送信できる文書がありません');
-        return;
-      }
-      setAiMenu(null);
-      setAiBusy({ mode, startedAt: Date.now() });
-      setAiRun({
-        mode,
-        selFrom: built.selFrom,
-        selTo: built.selTo,
-        cursorPos: built.cursorPos,
-        hasSelection: built.hasSelection,
-        text: '',
-        error: null
-      });
-      void (async () => {
-        try {
-          const answer = await ipc.aiAsk(mode, prompt, built.context);
-          setAiRun((prev) =>
-            prev && prev.mode === mode ? { ...prev, text: answer.text } : prev
-          );
-        } catch (err) {
-          setAiRun((prev) =>
-            prev && prev.mode === mode
-              ? { ...prev, error: err instanceof Error ? err.message : String(err) }
-              : prev
-          );
-        } finally {
-          setAiBusy((prev) => (prev && prev.mode === mode ? null : prev));
-        }
-      })();
-    },
-    [notifyMcpHuman]
-  );
-
-  const abortAi = useCallback(() => {
-    void ipc.aiAbort().catch((err) => notifyMcpHuman(String(err)));
-  }, [notifyMcpHuman]);
-
-  const applyAiInsert = useCallback(() => {
-    const view = viewRef.current;
-    if (!view || !aiRun?.text) return;
-    try {
-      insertAiMarkdown(view, aiRun.cursorPos, aiRun.text);
-      setAiRun(null);
-    } catch (err) {
-      notifyMcpHuman(err instanceof Error ? err.message : String(err));
-    }
-  }, [aiRun, notifyMcpHuman]);
-
-  const applyAiReplace = useCallback(() => {
-    const view = viewRef.current;
-    if (!view || !aiRun?.text) return;
-    try {
-      replaceAiRange(view, aiRun.selFrom, aiRun.selTo, aiRun.text);
-      setAiRun(null);
-    } catch (err) {
-      notifyMcpHuman(err instanceof Error ? err.message : String(err));
-    }
-  }, [aiRun, notifyMcpHuman]);
+  const ai = useAiCall({
+    getView,
+    notifyHuman: notifyMcpHuman,
+    onOpenSettings: () => setShowSettings(true)
+  });
 
   const handleFormat = useCallback((format: string, payload?: { href?: string }) => {
-    if (viewRef.current) applyFormat(viewRef.current, format, payload);
+    if (!viewRef.current) return;
+    // ショートカットからのリンクは URL を尋ねる (ツールバーは独自入力欄を持つ)
+    if (format === 'link' && !payload?.href) {
+      const href = window.prompt('リンク先URL:', 'https://');
+      if (!href || !href.trim()) return;
+      applyFormat(viewRef.current, format, { href: href.trim() });
+      return;
+    }
+    applyFormat(viewRef.current, format, payload);
   }, []);
 
   const handleToggleComments = useCallback(() => setShowComments((v) => !v), []);
+
+  // 参加者一覧 (人間 + AI。パネルと右ペインで共有)
+  const peersWithAi = mcp.aiName
+    ? [...collab.peers, { clientID: -1, name: mcp.aiName, color: AI_CURSOR_COLOR, ai: true }]
+    : collab.peers;
 
   // ファイル名はウィンドウ枠 (タイトルバー) に表示する
   useEffect(() => {
@@ -424,10 +379,33 @@ function App() {
           <button className="btn" onClick={() => doc.saveCurrent(autosave.discardServerAutosave)}>
             保存
           </button>
+          <button
+            className="btn"
+            onClick={() => void doc.saveAs(autosave.discardServerAutosave)}
+          >
+            名前を付けて保存
+          </button>
           <button className="btn" onClick={() => void doc.exportHtml()}>HTML出力</button>
           <button className="btn" onClick={() => setShowCollab((v) => !v)}>共同編集</button>
           <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
           <button className="btn" onClick={() => setShowSettings((v) => !v)}>設定</button>
+        </div>
+        <div className="app-status">
+          {collab.active && (
+            <span className="app-status-badge collab" title="共同編集中">
+              共同編集中 ({collab.peers.length}人)
+            </span>
+          )}
+          {mcp.aiName && (
+            <span className="app-status-badge ai" title={`AIが編集中: ${mcp.aiName}`}>
+              {mcp.aiName}
+            </span>
+          )}
+          {(ai.aiBusy || ai.directBusy || mcp.toolBusy) && (
+            <span className="app-status-badge ai processing" title="AIが処理中です">
+              AI処理中…
+            </span>
+          )}
         </div>
       </header>
 
@@ -443,11 +421,7 @@ function App() {
           roomName={collab.roomName}
           suggestedRoom={suggestedRoom}
           positionLabel={collab.roleLabel ?? undefined}
-          peers={
-            mcp.aiName
-              ? [...collab.peers, { clientID: -1, name: mcp.aiName, color: '#7c3aed', ai: true }]
-              : collab.peers
-          }
+          peers={peersWithAi}
           diagnostics={collab.diagnostics}
           showCursors={collab.showCursors}
           onShowCursorsChange={collab.setShowCursors}
@@ -473,55 +447,66 @@ function App() {
         <SettingsPanel
           restoreEnabled={restoreEnabled}
           onRestoreEnabledChange={handleRestoreEnabledChange}
+          onUserNameChange={handleUserNameChange}
+          lineNumbers={showLineNumbers}
+          onLineNumbersChange={handleLineNumbersChange}
+          fontSizePx={fontSizePx}
+          fontFamily={fontFamily}
+          onEditorFontChange={handleEditorFontChange}
           onClose={() => setShowSettings(false)}
         />
       )}
 
-      <main className="app-main" onContextMenu={handleEditorContextMenu}>
+      <main className="app-main" onContextMenu={ai.handleContextMenu}>
         <Editor
           onReady={handleReady}
           onChange={autosave.markDirty}
           getDocDir={getDocDir}
           showComments={showComments}
+          showLineNumbers={showLineNumbers}
+          fontSizePx={fontSizePx}
+          fontFamily={fontFamily}
+          onAiContinue={ai.continueDirectly}
+          onAiShortcut={ai.handleAiShortcut}
+          onFormatText={handleFormat}
+        />
+        <RightPane
+          getView={getView}
+          peers={peersWithAi}
+          aiName={mcp.aiName}
+          collabActive={collab.active}
         />
       </main>
 
-      {aiMenu && viewRef.current && (
+      {ai.aiMenu && (
         <AiContextMenu
-          x={aiMenu.x}
-          y={aiMenu.y}
-          enabled={aiEnabled}
-          contextChars={(() => {
-            try {
-              return buildAiContext(viewRef.current!, 'question', 8000).context.length;
-            } catch {
-              return 0;
-            }
-          })()}
-          hasSelection={!viewRef.current.state.selection.empty}
-          onExecute={executeAi}
-          onClose={() => setAiMenu(null)}
-          onOpenSettings={() => {
-            setAiMenu(null);
-            setShowSettings(true);
-          }}
+          x={ai.aiMenu.x}
+          y={ai.aiMenu.y}
+          enabled={ai.aiEnabled}
+          contextChars={ai.aiMenu.contextChars}
+          hasSelection={ai.aiMenu.hasSelection}
+          autoFocusPrompt={ai.aiMenu.focusPrompt}
+          onExecute={ai.executeAi}
+          onCopy={ai.copySelection}
+          onCut={ai.cutSelection}
+          onPaste={ai.pasteFromClipboard}
+          onClose={ai.closeAiMenu}
+          onOpenSettings={ai.openSettingsFromMenu}
         />
       )}
 
-      {(aiBusy || aiRun) && (
+      {(ai.aiBusy || ai.aiRun) && (
         <AiResultDialog
-          title={aiModeLabel((aiBusy ?? aiRun)?.mode ?? 'question')}
-          busy={aiBusy != null}
-          elapsedSecs={aiElapsed}
-          text={aiRun?.text ?? ''}
-          canReplace={aiRun?.hasSelection === true || aiRun?.mode === 'edit'}
-          error={aiRun?.error ?? null}
-          onInsert={applyAiInsert}
-          onReplace={applyAiReplace}
-          onAbort={abortAi}
-          onClose={() => {
-            setAiRun(null);
-          }}
+          title={aiModeLabel((ai.aiBusy ?? ai.aiRun)?.mode ?? 'question')}
+          busy={ai.aiBusy != null}
+          elapsedSecs={ai.aiElapsed}
+          text={ai.aiRun?.text ?? ''}
+          canReplace={ai.aiRun?.hasSelection === true || ai.aiRun?.mode === 'edit'}
+          error={ai.aiRun?.error ?? null}
+          onInsert={ai.applyAiInsert}
+          onReplace={ai.applyAiReplace}
+          onAbort={ai.abortAi}
+          onClose={ai.closeAiDialog}
         />
       )}
 

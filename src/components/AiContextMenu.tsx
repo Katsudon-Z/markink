@@ -12,7 +12,11 @@ export function AiContextMenu({
   enabled,
   contextChars,
   hasSelection,
+  autoFocusPrompt,
   onExecute,
+  onCopy,
+  onCut,
+  onPaste,
   onClose,
   onOpenSettings
 }: {
@@ -21,7 +25,12 @@ export function AiContextMenu({
   enabled: boolean;
   contextChars: number;
   hasSelection: boolean;
+  /** ショートカットから開いた場合、プロンプト欄にフォーカスする */
+  autoFocusPrompt?: boolean;
   onExecute: (mode: AiModeId, prompt: string) => void;
+  onCopy: () => void;
+  onCut: () => void;
+  onPaste: () => void;
   onClose: () => void;
   onOpenSettings: () => void;
 }) {
@@ -78,6 +87,18 @@ export function AiContextMenu({
     </button>
   );
 
+  const editItem = (key: string, label: string, action: () => void) => (
+    <button
+      key={key}
+      type="button"
+      className="ai-menu-item"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={action}
+    >
+      <span>{label}</span>
+    </button>
+  );
+
   return (
     <div
       ref={rootRef}
@@ -88,6 +109,10 @@ export function AiContextMenu({
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >
+      <div className="ai-menu-info">編集</div>
+      {editItem('copy', 'コピー', onCopy)}
+      {editItem('cut', '切り取り', onCut)}
+      {editItem('paste', '貼り付け', onPaste)}
       <div className="ai-menu-info">
         {hasSelection ? '選択範囲を送信' : '文書全体を送信'} ({contextChars}文字)
       </div>
@@ -102,6 +127,7 @@ export function AiContextMenu({
         value={prompt}
         placeholder="指示・質問を入力 (Enterで質問)"
         aria-label="AIへの指示・質問"
+        autoFocus={autoFocusPrompt === true}
         onMouseDown={(e) => e.stopPropagation()}
         onChange={(e) => {
           setPrompt(e.target.value);

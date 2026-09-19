@@ -17,6 +17,7 @@ pub fn markdown_file_arg(arg: &str) -> Option<String> {
 }
 
 /// 起動時に一度だけ呼ぶ。診断用に引数を一時フォルダへ記録する。
+/// 無引数起動では何も書かず、ログの無限増大を防ぐ (診断価値のあるファイル引数のみ記録)。
 pub fn init_from_args() {
     let args: Vec<String> = std::env::args_os()
         .map(|a| a.to_string_lossy().to_string())
@@ -24,6 +25,9 @@ pub fn init_from_args() {
     let detected = args.iter().skip(1).find_map(|a| markdown_file_arg(a));
     *STARTUP_FILE.lock().unwrap() = detected.clone();
 
+    if detected.is_none() {
+        return;
+    }
     if let Ok(mut log) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

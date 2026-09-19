@@ -16,6 +16,8 @@ import type { McpRequest, ToolContext } from '../lib/mcp/types';
  */
 export function useMcpBridge(ctx: ToolContext) {
   const [aiName, setAiName] = useState<string | null>(null);
+  // 実行中のツール要求数 (AI処理中の表示用。完了で必ず戻す)
+  const [busyCount, setBusyCount] = useState(0);
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
   const aiNameRef = useRef<string | null>(null);
@@ -31,6 +33,7 @@ export function useMcpBridge(ctx: ToolContext) {
       if (!alive) return;      unlistens.push(
         await listen<McpRequest>('mcp:request', async (event) => {
           const { id, tool, args } = event.payload;
+          setBusyCount((c) => c + 1);
           try {
             const handler = getToolHandler(tool);
             if (!handler) throw new Error(`未知のツール: ${tool}`);
@@ -43,6 +46,8 @@ export function useMcpBridge(ctx: ToolContext) {
               null,
               err instanceof Error ? err.message : String(err)
             );
+          } finally {
+            setBusyCount((c) => Math.max(0, c - 1));
           }
         })
       );
@@ -114,5 +119,5 @@ export function useMcpBridge(ctx: ToolContext) {
     };
   }, []);
 
-  return { aiName, aiConnected: aiName != null };
+  return { aiName, aiConnected: aiName != null, toolBusy: busyCount > 0 };
 }

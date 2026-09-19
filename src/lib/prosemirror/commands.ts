@@ -17,6 +17,8 @@ export interface FormatSpec {
   /** ツールチップ (日本語の用途説明) requirements.md:31 */
   title: string;
   run: (view: EditorView, payload?: FormatPayload) => void;
+  /** false のものはツールバーの「その他」メニューに入る (既定: true) */
+  inToolbar?: boolean;
 }
 
 /** コマンドを実行し、必要ならエディタにフォーカスを戻す */
@@ -55,6 +57,23 @@ function runLink(view: EditorView, payload?: FormatPayload): void {
 
 const TABLE_ROWS = 3;
 const TABLE_COLUMNS = 3;
+
+/** 水平線を挿入する。空段落は置換し、文字のある場所は直後に置く */
+function insertHorizontalRule(state: Parameters<Command>[0], dispatch?: Parameters<Command>[1]): boolean {
+  const hr = schema.nodes.horizontal_rule;
+  if (!hr) return false;
+  if (!dispatch) return true;
+  const { $from, empty } = state.selection;
+  const tr = state.tr;
+  if (empty && $from.depth > 0 && $from.parent.isTextblock && $from.parent.content.size === 0) {
+    tr.replaceWith($from.before($from.depth), $from.after($from.depth), hr.create());
+  } else {
+    tr.replaceSelectionWith(hr.create());
+  }
+  if (!tr.docChanged) return false;
+  dispatch(tr.scrollIntoView());
+  return true;
+}
 
 /** 表を挿入し、先頭セルにカーソルを移す */
 function insertTable(rows: number, columns: number): Command {
@@ -115,6 +134,10 @@ function insertTable(rows: number, columns: number): Command {
 export const FORMATS: FormatSpec[] = [
   { id: 'h1', label: 'H1', title: '大見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 1 })) },
   { id: 'h2', label: 'H2', title: '中見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 2 })) },
+  { id: 'h3', label: 'H3', title: '小見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 3 })) },
+  { id: 'h4', label: 'H4', title: '見出し4にします', inToolbar: false, run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 4 })) },
+  { id: 'h5', label: 'H5', title: '見出し5にします', inToolbar: false, run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 5 })) },
+  { id: 'hr', label: '―', title: '水平線を挿入します', inToolbar: false, run: (v) => runCommand(v, insertHorizontalRule) },
   { id: 'paragraph', label: '本文', title: '本文(段落)に戻します', run: (v) => runCommand(v, setBlockType(schema.nodes.paragraph)) },
   { id: 'bold', label: 'B', title: '太字にします', run: (v) => runCommand(v, toggleMark(schema.marks.strong)) },
   { id: 'italic', label: 'I', title: '斜体にします', run: (v) => runCommand(v, toggleMark(schema.marks.em)) },

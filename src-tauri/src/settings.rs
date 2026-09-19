@@ -14,6 +14,8 @@ pub const DEFAULT_AI_BACKEND_URL: &str = "http://127.0.0.1:4096";
 pub const DEFAULT_AI_TIMEOUT_SECS: u64 = 120;
 pub const DEFAULT_AI_MAX_CHARS: usize = 8000;
 pub const DEFAULT_OPENCODE_BIN: &str = "opencode";
+/// AI呼び出しの提供方式: "local" = opencode serve / "api" = OpenAI互換API直呼出
+pub const DEFAULT_AI_PROVIDER: &str = "local";
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase", default)]
@@ -29,16 +31,32 @@ pub struct Settings {
     pub restore_enabled: bool,
     /// エディタ起点のAI呼び出し (opencode serve) を使うか。既定は無効。
     pub ai_call_enabled: bool,
-    /// serve に渡すモデル (空なら serve 側の既定。例: "opencode-go/kimi-k3")
+    /// 共同編集で表示する自分の名前 (空なら自動生成)
+    pub user_name: String,
+    /// AI呼び出しの提供方式: "local" (opencode serve) | "api" (OpenAI互換API)
+    pub ai_provider: String,
+    /// serve に渡すモデル (local 時。空なら serve 側の既定。例: "opencode-go/kimi-k3")
     pub ai_model: String,
-    /// serve のURL (localhost のみ許可)
+    /// serve のURL (local 時のみ使用。localhost のみ許可)
     pub ai_backend_url: String,
+    /// OpenAI互換APIのエンドポイント (api 時。例: https://api.openai.com/v1/chat/completions)
+    pub ai_api_url: String,
+    /// APIキー (api 時。空なら Authorization ヘッダを付けない)
+    pub ai_api_key: String,
+    /// APIで使うモデル名 (api 時)
+    pub ai_api_model: String,
     /// 応答待ちタイムアウト秒
     pub ai_timeout_secs: u64,
     /// 送信する文書の上限文字数
     pub ai_max_chars: usize,
-    /// opencode 実行ファイル名またはパス
+    /// opencode 実行ファイル名またはパス (local 時)
     pub opencode_bin: String,
+    /// 行番号ガターを表示するか。既定は表示。
+    pub line_numbers: bool,
+    /// エディタの文字サイズ (px)。既定は 14。
+    pub font_size: f64,
+    /// エディタのフォントファミリ (CSS値。空なら既定)。
+    pub font_family: String,
 }
 
 impl Default for Settings {
@@ -49,11 +67,19 @@ impl Default for Settings {
             ai_auto_save: true,
             restore_enabled: false,
             ai_call_enabled: false,
+            user_name: String::new(),
+            ai_provider: DEFAULT_AI_PROVIDER.to_string(),
             ai_model: String::new(),
             ai_backend_url: DEFAULT_AI_BACKEND_URL.to_string(),
+            ai_api_url: String::new(),
+            ai_api_key: String::new(),
+            ai_api_model: String::new(),
             ai_timeout_secs: DEFAULT_AI_TIMEOUT_SECS,
             ai_max_chars: DEFAULT_AI_MAX_CHARS,
             opencode_bin: DEFAULT_OPENCODE_BIN.to_string(),
+            line_numbers: true,
+            font_size: 14.0,
+            font_family: String::new(),
         }
     }
 }
@@ -144,6 +170,43 @@ pub fn set_restore_enabled(enabled: bool) -> Result<(), String> {
     save(&s)
 }
 
+#[tauri::command]
+pub fn set_user_name(name: String) -> Result<(), String> {
+    let mut s: Settings = load();
+    s.user_name = name.trim().to_string();
+    save(&s)
+}
+
+#[tauri::command]
+pub fn set_line_numbers(enabled: bool) -> Result<(), String> {
+    let mut s: Settings = load();
+    s.line_numbers = enabled;
+    save(&s)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorFont {
+    pub size_px: Option<f64>,
+    pub family: Option<String>,
+}
+
+/// エディタの文字サイズ・種類を変更する (表示設定。文書内容には影響しない)
+#[tauri::command]
+pub fn set_editor_font(font: EditorFont) -> Result<(), String> {
+    let mut s: Settings = load();
+    if let Some(px) = font.size_px {
+        if !px.is_finite() {
+            return Err("文字サイズが不正です".to_string());
+        }
+        s.font_size = px.clamp(10.0, 32.0);
+    }
+    if let Some(family) = font.family {
+        s.font_family = family.trim().to_string();
+    }
+    save(&s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +260,11 @@ mod tests {
         assert_eq!(parsed.ai_timeout_secs, DEFAULT_AI_TIMEOUT_SECS);
         assert_eq!(parsed.ai_max_chars, DEFAULT_AI_MAX_CHARS);
         assert!(parsed.ai_model.is_empty());
+        // 新項目も旧ファイルでは既定値で補完される
+        assert_eq!(parsed.ai_provider, DEFAULT_AI_PROVIDER);
+        assert!(parsed.ai_api_url.is_empty());
+        assert!(parsed.ai_api_key.is_empty());
+        assert!(parsed.ai_api_model.is_empty());
+        assert!(parsed.user_name.is_empty());
     }
 }

@@ -1,6 +1,8 @@
 import { type Command, type Plugin } from 'prosemirror-state';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
+import { InputRule, inputRules } from 'prosemirror-inputrules';
+import type { MarkType } from 'prosemirror-model';
 import { splitListItem } from 'prosemirror-schema-list';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { gapCursor } from 'prosemirror-gapcursor';
@@ -11,6 +13,7 @@ import { schema } from './schema';
 import { placeholderPlugin } from './image';
 import { aiCursorPlugin, getAttachedAwareness } from '../mcp/presence';
 import { docVersionPlugin } from '../mcp/docVersion';
+import { lineNumbersPlugin } from './lineNumbers';
 
 export const PLACEHOLDER_HINT =
   '入力例: ここに入力してください。上部のボタンで見出しや箇条書きも作れます。';
@@ -51,7 +54,32 @@ export function createBasePlugins({ historyMode }: BasePluginOptions): Plugin[] 
       ? { 'Mod-z': yUndo, 'Mod-y': yRedo, 'Mod-Shift-z': yRedo }
       : { 'Mod-z': undo, 'Mod-y': redo, 'Mod-Shift-z': redo };
 
+  // Markdown のインライン記法を入力時に変換 (`*x*`→斜体、`**x**`→太字、`` `x` ``→コード)。
+  // ブロック記法 (#、-、>) は既存の Enter/リスト挙動と干渉するため対象外。
+  // markInputRule は同梱版に無いため、prosemirror-markdown 例と同等の自前実装を使う。
+  const markInputRule = (regexp: RegExp, markType: MarkType): InputRule =>
+    new InputRule(regexp, (state, match, start, end) => {
+      const tr = state.tr;
+      if (match[1]) {
+        const textStart = start + match[0].indexOf(match[1]);
+        const textEnd = textStart + match[1].length;
+        tr.delete(textEnd, end);
+        tr.delete(start, textStart);
+        tr.addMark(start, start + match[1].length, markType.create());
+        tr.removeStoredMark(markType);
+      }
+      return tr;
+    });
+  const markdownInput = inputRules({
+    rules: [
+      markInputRule(/(?:^|[^*_])\*([^*]+)\*$/, schema.marks.em),
+      markInputRule(/(?:^|[^*_])\*\*([^*]+)\*\*$/, schema.marks.strong),
+      markInputRule(/(?:^|[^`])`([^`]+)`$/, schema.marks.code)
+    ]
+  });
+
   return [
+    markdownInput,
     ...historyPlugins,
     // 表のセル移動 (Tab/Shift-Tab) などは keymap より先に評価する
     tableEditing(),
@@ -59,6 +87,8 @@ export function createBasePlugins({ historyMode }: BasePluginOptions): Plugin[] 
     aiCursorPlugin(getAttachedAwareness),
     // 文書版の監視 (変更検知用。AI編集と人間編集を区別する)
     docVersionPlugin(),
+    // 行番号ガター (設定で表示切替)
+    lineNumbersPlugin(),
     keymap(historyKeys),
     // Enter/Shift+Enter は baseKeymap より先に評価する
     keymap({
