@@ -10,7 +10,7 @@ import { bumpDocVersion } from './lib/mcp/docVersion';
 import { AI_CURSOR_COLOR } from './lib/mcp/presence';
 import { baseName, dirName, stem as stemOfPath, relativePath, toFileUri } from './lib/path';
 import { ipc } from './lib/ipc';
-import { useAutosave } from './hooks/useAutosave';
+import { useAutosave, serializeView } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
 import { useDocumentActions, useStartupFile, UNTITLED } from './hooks/useDocumentActions';
 import { useMcpBridge } from './hooks/useMcpBridge';
@@ -20,6 +20,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { AiContextMenu } from './components/AiContextMenu';
 import { AiResultDialog } from './components/AiResultDialog';
 import { RightPane } from './components/RightPane';
+import { MenuDropdown } from './components/MenuDropdown';
 import { aiModeLabel } from './lib/ai/context';
 import { MCP_FEATURE_ENABLED } from './lib/features';
 
@@ -30,6 +31,9 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   // 起動時の初期画面 (ロゴ + 新規作成/開く)。ファイルを開いたら閉じる
   const [showStartScreen, setShowStartScreen] = useState(true);
+  // Markdownソース表示 (読み取り専用)
+  const [markdownSource, setMarkdownSource] = useState<string | null>(null);
+  const [mdCopied, setMdCopied] = useState(false);
   const [suggestedRoom, setSuggestedRoom] = useState<string | undefined>(undefined);
   // 前回保存していない内容の復元機能 (既定: 無効)
   const [restoreEnabled, setRestoreEnabled] = useState(false);
@@ -436,20 +440,52 @@ function App() {
 
       <header className="app-header">
         <div className="app-actions">
-          <button className="btn" onClick={() => doc.newDocument(autosave.discardServerAutosave)}>
-            新規作成
-          </button>
-          <button className="btn" onClick={() => void doc.openDialog()}>開く</button>
-          <button className="btn" onClick={() => doc.saveCurrent(autosave.discardServerAutosave)}>
-            保存
-          </button>
+          <MenuDropdown
+            label="ファイル"
+            title="ファイル操作"
+            buttonClassName="btn"
+            items={[
+              {
+                id: 'new',
+                label: '新規作成',
+                onSelect: () => doc.newDocument(autosave.discardServerAutosave)
+              },
+              {
+                id: 'open',
+                label: '開く',
+                onSelect: () => void doc.openDialog()
+              },
+              {
+                id: 'save',
+                label: '保存',
+                onSelect: () => doc.saveCurrent(autosave.discardServerAutosave)
+              },
+              {
+                id: 'save-as',
+                label: '名前を付けて保存',
+                onSelect: () => void doc.saveAs(autosave.discardServerAutosave)
+              },
+              {
+                id: 'export-html',
+                label: 'HTML出力',
+                onSelect: () => void doc.exportHtml()
+              }
+            ]}
+          />
           <button
             className="btn"
-            onClick={() => void doc.saveAs(autosave.discardServerAutosave)}
+            onClick={() => {
+              const md = serializeView(viewRef.current);
+              if (md == null) {
+                notifyMcpHuman('エディタが準備できていません');
+                return;
+              }
+              setMdCopied(false);
+              setMarkdownSource(md);
+            }}
           >
-            名前を付けて保存
+            Markdown表示
           </button>
-          <button className="btn" onClick={() => void doc.exportHtml()}>HTML出力</button>
           <button className="btn" onClick={() => setShowCollab((v) => !v)}>共同編集</button>
           {MCP_FEATURE_ENABLED && (
             <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
@@ -638,6 +674,31 @@ function App() {
               </button>
               <button className="btn" onClick={() => setShowSavePrompt(false)}>
                 キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {markdownSource != null && (
+        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="md-source-title">
+          <div className="restore-dialog ai-settings">
+            <h2 id="md-source-title" className="restore-title">Markdownソース (読み取り専用)</h2>
+            <pre className="ai-settings-code ai-result-pre">{markdownSource}</pre>
+            <div className="restore-actions">
+              <button
+                className="btn"
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(markdownSource)
+                    .then(() => setMdCopied(true))
+                    .catch(() => notifyMcpHuman('コピーに失敗しました'));
+                }}
+              >
+                {mdCopied ? 'コピーしました' : 'コピー'}
+              </button>
+              <button className="btn btn-primary" onClick={() => setMarkdownSource(null)}>
+                閉じる
               </button>
             </div>
           </div>

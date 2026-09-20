@@ -184,6 +184,17 @@ pub fn set_user_name(name: String) -> Result<(), String> {
     save(&s)
 }
 
+/// OSのログインユーザ名 (共同編集の表示名の既定値用。未設定時は None)
+#[tauri::command]
+pub fn os_username() -> Option<String> {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .or_else(|_| std::env::var("LOGNAME"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 #[tauri::command]
 pub fn set_line_numbers(enabled: bool) -> Result<(), String> {
     let mut s: Settings = load();

@@ -5,6 +5,7 @@ dist-tauri
 
 # testing
 coverage
+tests
 
 # production
 build
@@ -26,3 +27,12 @@ Thumbs.db
 # temp files
 *.tmp
 *.temp
+
+#開発用メモなど
+design
+promotion
+plan.md
+requirements.md
+mcp-plan.md
+docs/mcp-setup.md
+

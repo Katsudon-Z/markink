@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { FORMATS } from '../lib/prosemirror/commands';
+import { MenuDropdown } from './MenuDropdown';
 import './Toolbar.css';
 
 interface ToolbarProps {
@@ -10,69 +11,7 @@ interface ToolbarProps {
 }
 
 /** ツールバー内のドロップダウンメニュー (その他・表)。外側クリック・Escape で閉じる */
-function ToolbarMenu({
-  label,
-  title,
-  items,
-  extra
-}: {
-  label: string;
-  title: string;
-  items: { id: string; label: string; title: string; onSelect: () => void }[];
-  extra?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown, true);
-    document.addEventListener('keydown', onKey, true);
-    return () => {
-      document.removeEventListener('mousedown', onDown, true);
-      document.removeEventListener('keydown', onKey, true);
-    };
-  }, [open ]);
-
-  return (
-    <span ref={ref} className="toolbar-other">
-      <button
-        className="toolbar-button"
-        title={title}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {label} ▾
-      </button>
-      {open && (
-        <span className="toolbar-other-menu" role="menu">
-          {items.map((tool) => (
-            <button
-              key={tool.id}
-              className="toolbar-button"
-              title={tool.title}
-              aria-label={tool.title}
-              onClick={() => {
-                tool.onSelect();
-                setOpen(false);
-              }}
-            >
-              {tool.label}
-            </button>
-          ))}
-          {extra}
-        </span>
-      )}
-    </span>
-  );
-}
+export const ToolbarMenu = MenuDropdown;
 
 export const Toolbar = React.memo(function Toolbar({
   onFormat,

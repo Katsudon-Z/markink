@@ -60,6 +60,7 @@ pub fn run() {
             settings::mcp_get_settings,
             settings::set_restore_enabled,
             settings::set_user_name,
+            settings::os_username,
             settings::set_line_numbers,
             settings::set_image_path_mode,
             settings::set_editor_font,

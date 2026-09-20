@@ -91,6 +91,7 @@ export const ipc = {
   setRestoreEnabled: (enabled: boolean) =>
     invoke<void>('set_restore_enabled', { enabled }),
   setUserName: (name: string) => invoke<void>('set_user_name', { name }),
+  osUsername: () => invoke<string | null>('os_username'),
   setLineNumbers: (enabled: boolean) => invoke<void>('set_line_numbers', { enabled }),
   setImagePathMode: (mode: string) => invoke<void>('set_image_path_mode', { mode }),
   readFileBytes: (path: string) => invoke<number[]>('read_file_bytes', { path }),

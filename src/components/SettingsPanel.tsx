@@ -122,7 +122,7 @@ export function SettingsPanel({
 
         <h3 className="ai-settings-heading">自分の名前 (共同編集で表示)</h3>
         <div className="ai-settings-row">
-          <span>名前 <small>(空なら自動生成)</small></span>
+          <span>名前 <small>(空ならPCのログインユーザ名)</small></span>
           <input
             type="text"
             value={userName}

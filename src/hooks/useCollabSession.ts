@@ -6,6 +6,18 @@ import { clearRemoteHighlights } from '../lib/collaboration/remoteHighlight';
 import { ipc, type RelayStats } from '../lib/ipc';
 import { attachAwareness, refreshAiCursor } from '../lib/mcp/presence';
 
+/** OSのログインユーザ名 (取得済みなら使い回す。設定名が空のときの表示名用) */
+let cachedOsName: string | null | undefined;
+async function resolveOsName(): Promise<string | null> {
+  if (cachedOsName !== undefined) return cachedOsName;
+  try {
+    cachedOsName = await ipc.osUsername();
+  } catch {
+    cachedOsName = null;
+  }
+  return cachedOsName;
+}
+
 const DIAGNOSTICS_INTERVAL_MS = 2000;
 
 export interface CollabDiagnostics {
@@ -93,7 +105,6 @@ export function useCollabSession({
   getUserNameRef.current = getUserName;
   const showCursorsRef = useRef(showCursors);
   showCursorsRef.current = showCursors;
-
   /** 相手カーソル表示の切替 (エディタ状態を再構築。Yjs 文書は保持される) */
   const setShowCursors = useCallback(
     (next: boolean) => {
@@ -152,7 +163,8 @@ export function useCollabSession({
       const session = modules.session.startCollabSession({
         roomName: room,
         signalingUrl: url,
-        userName: getUserNameRef.current?.() || undefined
+        // 設定名 → OSログインユーザ名 → 自動生成 の順で表示名を決める
+        userName: getUserNameRef.current?.() || (await resolveOsName()) || undefined
       });
       sessionRef.current = session;
       // AIプレゼンスを Awareness に接続 (人間の user フィールドは触らない)
