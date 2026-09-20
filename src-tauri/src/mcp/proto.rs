@@ -8,7 +8,7 @@ use crate::mcp::catalog;
 use crate::mcp::connection::{self, ConnectionSlot};
 use crate::mcp::gateway::EditorGateway;
 
-pub const SERVER_NAME: &str = "MDNotepad";
+pub const SERVER_NAME: &str = "markink";
 pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -99,7 +99,7 @@ fn handle_initialize(id: Value, params: &Value, ctx: &ProtoContext<'_>) -> Strin
         json!({
             "protocolVersion": chosen,
             "capabilities": { "tools": { "listChanged": false } },
-            "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION, "title": "MDNotepad" }
+            "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION, "title": "markink" }
         }),
     )
 }

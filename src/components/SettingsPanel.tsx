@@ -38,6 +38,8 @@ export function SettingsPanel({
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [fontSize, setFontSize] = useState(String(fontSizePx));
   const [fontFamilyValue, setFontFamilyValue] = useState(fontFamily);
+  const [appVersion, setAppVersion] = useState('');
+  const [imagePathMode, setImagePathMode] = useState('relative');
 
   const FONT_PRESETS = [
     { value: '', label: '既定 (Segoe UI, メイリオ)' },
@@ -59,6 +61,7 @@ export function SettingsPanel({
       setAiApiKey(s.aiApiKey);
       setAiApiModel(s.aiApiModel);
       setAiMaxChars(String(s.aiMaxChars));
+      setImagePathMode(s.imagePathMode === 'absolute' ? 'absolute' : 'relative');
       setAiStatus(st);
       setAiError(null);
     } catch (e) {
@@ -69,6 +72,13 @@ export function SettingsPanel({
   useEffect(() => {
     void refreshAi();
   }, [refreshAi]);
+
+  useEffect(() => {
+    void import('@tauri-apps/api/app')
+      .then(({ getVersion }) => getVersion())
+      .then((v) => setAppVersion(v))
+      .catch(() => setAppVersion(''));
+  }, []);
 
   const runAiAction = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -169,6 +179,26 @@ export function SettingsPanel({
             ))}
           </select>
         </div>
+
+        <h3 className="ai-settings-heading">画像</h3>
+        <div className="ai-settings-row">
+          <span>画像（リンク）のパス記録方式</span>
+          <select
+            value={imagePathMode}
+            onChange={(e) => {
+              setImagePathMode(e.target.value);
+              void runAiAction(() => ipc.setImagePathMode(e.target.value));
+            }}
+            aria-label="画像リンクのパス記録方式"
+          >
+            <option value="relative">相対</option>
+            <option value="absolute">絶対</option>
+          </select>
+        </div>
+        <p className="restore-message">
+          「画像（リンク）」で挿入するときの記録方式 (既定: 相対)。
+          「画像（コピー）」は常にassetsへコピーします。
+        </p>
 
         <h3 className="ai-settings-heading">エディタからのAI呼び出し (右クリックメニュー)</h3>        {aiError && <p className="ai-settings-error">{aiError}</p>}
         <div className="ai-settings-row">
@@ -326,6 +356,26 @@ export function SettingsPanel({
             </ul>
           </div>
         )}
+        <h3 className="ai-settings-heading">バージョン情報</h3>
+        <div className="ai-settings-row">
+          <span>markink</span>
+          <strong>{appVersion ? `バージョン ${appVersion}` : '確認中…'}</strong>
+        </div>
+        <div className="ai-settings-row">
+          <span>公式サイト</span>
+          <button
+            className="btn"
+            onClick={() => {
+              void import('@tauri-apps/plugin-opener')
+                .then(({ openUrl }) => openUrl('https://github.com/Katsudon-Z/markink'))
+                .catch((e) =>
+                  setAiError(e instanceof Error ? e.message : String(e))
+                );
+            }}
+          >
+            https://github.com/Katsudon-Z/markink を開く
+          </button>
+        </div>
         <div className="restore-actions">
           <button className="btn btn-primary" onClick={onClose}>
             閉じる

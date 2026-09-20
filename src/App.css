@@ -189,6 +189,34 @@ html, body {
   text-overflow: ellipsis;
 }
 
+/* 起動時の初期画面 (ロゴ + 新規作成/開く。ダイアログ類より下に置く) */
+.start-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  background: #fff;
+}
+
+.start-logo {
+  width: min(60vw, 420px);
+  height: auto;
+}
+
+.start-actions {
+  display: flex;
+  gap: 16px;
+}
+
+.btn-large {
+  padding: 10px 28px;
+  font-size: 15px;
+}
+
 /* 復元提案ダイアログ (requirements.md:48) */
 .restore-overlay {
   position: fixed;

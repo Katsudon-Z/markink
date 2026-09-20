@@ -20,6 +20,8 @@ export interface McpSettings {
   userName: string;
   /** 行番号ガターを表示するか */
   lineNumbers: boolean;
+  /** 画像パスの記録方式: "relative" | "absolute" */
+  imagePathMode: string;
   /** エディタの文字サイズ (px) */
   fontSize: number;
   /** エディタのフォントファミリ (CSS値。空なら既定) */
@@ -90,6 +92,8 @@ export const ipc = {
     invoke<void>('set_restore_enabled', { enabled }),
   setUserName: (name: string) => invoke<void>('set_user_name', { name }),
   setLineNumbers: (enabled: boolean) => invoke<void>('set_line_numbers', { enabled }),
+  setImagePathMode: (mode: string) => invoke<void>('set_image_path_mode', { mode }),
+  readFileBytes: (path: string) => invoke<number[]>('read_file_bytes', { path }),
   setEditorFont: (font: { sizePx?: number; family?: string }) =>
     invoke<void>('set_editor_font', { font }),
   mcpAutostart: () => invoke<McpStatus>('mcp_autostart'),

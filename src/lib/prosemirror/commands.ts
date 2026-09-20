@@ -17,8 +17,8 @@ export interface FormatSpec {
   /** ツールチップ (日本語の用途説明) requirements.md:31 */
   title: string;
   run: (view: EditorView, payload?: FormatPayload) => void;
-  /** false のものはツールバーの「その他」メニューに入る (既定: true) */
-  inToolbar?: boolean;
+  /** 配置先メニュー。未指定はツールバー本体、'other'=その他、'table'=表、'date'=日付 */
+  menu?: 'other' | 'table' | 'date';
 }
 
 /** コマンドを実行し、必要ならエディタにフォーカスを戻す */
@@ -53,6 +53,56 @@ function runLink(view: EditorView, payload?: FormatPayload): void {
     view
   );
   focusView(view);
+}
+
+/** 現在の日付・日時をカーソル位置に挿入する */
+function insertDateText(format: (d: Date) => string): Command {
+  return (state, dispatch) => {
+    if (!dispatch) return true;
+    const { from, to } = state.selection;
+    dispatch(state.tr.insertText(format(new Date()), from, to).scrollIntoView());
+    return true;
+  };
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function dateSlash(d: Date): string {
+  return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+}
+
+function dateJa(d: Date): string {
+  return `${d.getFullYear()}年${pad2(d.getMonth() + 1)}月${pad2(d.getDate())}日`;
+}
+
+function datetimeSlash(d: Date): string {
+  return `${dateSlash(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function timeColon(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/** 和暦の日付 (令和・平成・昭和・大正・明治。元年表記あり)。それ以前は西暦 */
+export function warekiText(d: Date): string {
+  const eras = [
+    { name: '令和', start: new Date(2019, 4, 1) },
+    { name: '平成', start: new Date(1989, 0, 8) },
+    { name: '昭和', start: new Date(1926, 11, 25) },
+    { name: '大正', start: new Date(1912, 6, 30) },
+    { name: '明治', start: new Date(1868, 8, 8) }
+  ];
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  for (const e of eras) {
+    if (t >= e.start.getTime()) {
+      const year = d.getFullYear() - e.start.getFullYear() + 1;
+      const y = year === 1 ? '元' : String(year);
+      return `${e.name}${y}年${d.getMonth() + 1}月${d.getDate()}日`;
+    }
+  }
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 const TABLE_ROWS = 3;
@@ -135,9 +185,9 @@ export const FORMATS: FormatSpec[] = [
   { id: 'h1', label: 'H1', title: '大見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 1 })) },
   { id: 'h2', label: 'H2', title: '中見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 2 })) },
   { id: 'h3', label: 'H3', title: '小見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 3 })) },
-  { id: 'h4', label: 'H4', title: '見出し4にします', inToolbar: false, run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 4 })) },
-  { id: 'h5', label: 'H5', title: '見出し5にします', inToolbar: false, run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 5 })) },
-  { id: 'hr', label: '―', title: '水平線を挿入します', inToolbar: false, run: (v) => runCommand(v, insertHorizontalRule) },
+  { id: 'h4', label: 'H4', title: '見出し4にします', menu: 'other', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 4 })) },
+  { id: 'h5', label: 'H5', title: '見出し5にします', menu: 'other', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 5 })) },
+  { id: 'hr', label: '―', title: '水平線を挿入します', menu: 'other', run: (v) => runCommand(v, insertHorizontalRule) },
   { id: 'paragraph', label: '本文', title: '本文(段落)に戻します', run: (v) => runCommand(v, setBlockType(schema.nodes.paragraph)) },
   { id: 'bold', label: 'B', title: '太字にします', run: (v) => runCommand(v, toggleMark(schema.marks.strong)) },
   { id: 'italic', label: 'I', title: '斜体にします', run: (v) => runCommand(v, toggleMark(schema.marks.em)) },
@@ -145,13 +195,22 @@ export const FORMATS: FormatSpec[] = [
   { id: 'orderedList', label: '1.', title: '番号付きリストにします', run: (v) => runCommand(v, wrapInList(schema.nodes.ordered_list)) },
   { id: 'quote', label: '❝', title: '引用にします', run: (v) => runCommand(v, wrapIn(schema.nodes.blockquote)) },
   { id: 'code', label: '</>', title: 'コードブロックにします', run: (v) => runCommand(v, setBlockType(schema.nodes.code_block)) },
-  { id: 'table', label: '表', title: '3行×3列の表を挿入します', run: (v) => runCommand(v, insertTable(TABLE_ROWS, TABLE_COLUMNS)) },
-  { id: 'rowAdd', label: '行+', title: '現在の行の下に行を追加します', run: (v) => runCommand(v, addRowAfter) },
-  { id: 'rowDelete', label: '行-', title: '現在の行を削除します', run: (v) => runCommand(v, deleteRow) },
-  { id: 'columnAdd', label: '列+', title: '現在の列の右に列を追加します', run: (v) => runCommand(v, addColumnAfter) },
-  { id: 'columnDelete', label: '列-', title: '現在の列を削除します', run: (v) => runCommand(v, deleteColumn) },
-  { id: 'tableDelete', label: '表-', title: '表を削除します', run: (v) => runCommand(v, deleteTable) },
-  { id: 'link', label: '🔗', title: 'リンクを挿入します', run: runLink },
+  { id: 'table', label: '表', title: '3行×3列の表を挿入します', menu: 'table', run: (v) => runCommand(v, insertTable(TABLE_ROWS, TABLE_COLUMNS)) },
+  { id: 'rowAdd', label: '行+', title: '現在の行の下に行を追加します', menu: 'table', run: (v) => runCommand(v, addRowAfter) },
+  { id: 'rowDelete', label: '行-', title: '現在の行を削除します', menu: 'table', run: (v) => runCommand(v, deleteRow) },
+  { id: 'columnAdd', label: '列+', title: '現在の列の右に列を追加します', menu: 'table', run: (v) => runCommand(v, addColumnAfter) },
+  { id: 'columnDelete', label: '列-', title: '現在の列を削除します', menu: 'table', run: (v) => runCommand(v, deleteColumn) },
+  { id: 'tableDelete', label: '表-', title: '表を削除します', menu: 'table', run: (v) => runCommand(v, deleteTable) },
+  { id: 'link', label: '🔗', title: 'リンクを挿入します (Ctrl+クリックで開く)', run: runLink },
+  { id: 'date', label: '日付（yyyy/mm/dd）', title: '現在の日付を挿入します', menu: 'date', run: (v) => runCommand(v, insertDateText(dateSlash)) },
+  { id: 'dateJa', label: '日付（yyyy年mm月dd日）', title: '現在の日付を和文形式で挿入します', menu: 'date', run: (v) => runCommand(v, insertDateText(dateJa)) },
+  { id: 'datetime', label: '日時（yyyy/mm/dd hh:mm）', title: '現在の日時を挿入します', menu: 'date', run: (v) => runCommand(v, insertDateText(datetimeSlash)) },
+  { id: 'time', label: '時刻（hh:mm:ss）', title: '現在の時刻を挿入します', menu: 'date', run: (v) => runCommand(v, insertDateText(timeColon)) },
+  { id: 'dateWareki', label: '日付（和暦）', title: '現在の日付を和暦で挿入します', menu: 'date', run: (v) => runCommand(v, insertDateText(warekiText)) },
+  // 画像挿入はファイル選択ダイアログと設定 (リンク/コピー・相対/絶対) が要るため、
+  // App.handleFormat が横取りして非同期フローで処理する。直接呼ばれた場合は何もしない。
+  { id: 'image-link', label: '画像（リンク）', title: '画像を参照リンクで挿入します (コピーなし)', menu: 'other', run: () => {} },
+  { id: 'image-copy', label: '画像（コピー）', title: '画像をassetsにコピーして挿入します', menu: 'other', run: () => {} },
   { id: 'undo', label: '↶', title: '元に戻す (Ctrl+Z)', run: (v) => runCommand(v, undo) },
   { id: 'redo', label: '↷', title: 'やり直す (Ctrl+Y)', run: (v) => runCommand(v, redo) }
 ];

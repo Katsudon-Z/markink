@@ -27,7 +27,7 @@ export function AiSettingsPanel({ onClose }: { onClose: () => void }) {
   }, [refresh]);
 
   useEffect(() => {
-    void ipc.mcpExePath().then(setExePath).catch(() => setExePath('app.exe'));
+    void ipc.mcpExePath().then(setExePath).catch(() => setExePath('markink.exe'));
   }, []);
 
   const copyText = useCallback(async (text: string, label: string) => {
@@ -60,7 +60,7 @@ export function AiSettingsPanel({ onClose }: { onClose: () => void }) {
   const httpUrl =
     status?.httpPort != null ? `http://127.0.0.1:${status.httpPort}/mcp` : null;
   const stdioSnippet = JSON.stringify(
-    { mcpServers: { mdnotepad: { command: exePath || 'app.exe', args: ['mcp-stdio'] } } },
+    { mcpServers: { markink: { command: exePath || 'markink.exe', args: ['mcp-stdio'] } } },
     null,
     2
   );

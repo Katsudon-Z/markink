@@ -32,6 +32,17 @@ pub fn write_markdown(path: String, content: String, state: State<CurrentDocumen
     Ok(())
 }
 
+/// 画像などバイナリの読み込み (assets へのコピー用)。サイズ上限 20MB。
+#[tauri::command]
+pub fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    let data =
+        fs::read(Path::new(&path)).map_err(|_| "ファイルを読み込めませんでした".to_string())?;
+    if data.len() > 20 * 1024 * 1024 {
+        return Err("ファイルが大きすぎます (20MBまで)".to_string());
+    }
+    Ok(data)
+}
+
 /// HTML などの書き出し用 (現在の文書パスは変更しない)
 #[tauri::command]
 pub fn write_text_file(path: String, content: String) -> Result<(), String> {

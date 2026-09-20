@@ -31,7 +31,7 @@ pub fn init_from_args() {
     if let Ok(mut log) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(std::env::temp_dir().join("mdnotepad-startup.log"))
+        .open(std::env::temp_dir().join("markink-startup.log"))
     {
         use std::io::Write;
         let _ = writeln!(

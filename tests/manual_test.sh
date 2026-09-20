@@ -1,7 +1,7 @@
 #!/bin/bash
 # 手動テストスイート - requirements.md要件検証
 
-echo "=== MDNotepad 要件テスト ==="
+echo "=== markink 要件テスト ==="
 echo ""
 
 # 1. プロジェクト構造チェック
@@ -15,8 +15,8 @@ fi
 # 2. Tauri設定確認
 echo ""
 echo "[2] Tauri 設定確認 (Windows専用・ポータブル)"
-if grep -q '"productName": "MDNotepad"' src-tauri/tauri.conf.json; then
-    echo "✓ 製品名 MDNotepad 確認"
+if grep -q '"productName": "markink"' src-tauri/tauri.conf.json; then
+    echo "✓ 製品名 markink 確認"
 fi
 if grep -q '"width": 1024' src-tauri/tauri.conf.json; then
     echo "✓ ウィンドウサイズ設定確認 (1024x768)"

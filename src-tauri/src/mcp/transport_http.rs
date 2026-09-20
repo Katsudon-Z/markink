@@ -467,7 +467,7 @@ mod tests {
         let resp = post(port, MCP_PATH, Some("tok"), None, &body).await;
         assert_eq!(resp.status, 200);
         let v: Value = serde_json::from_str(&resp.body).unwrap();
-        assert_eq!(v["result"]["serverInfo"]["name"], "MDNotepad");
+        assert_eq!(v["result"]["serverInfo"]["name"], "markink");
         assert!(session_header(&resp).is_some(), "セッションIDを発行する");
     }
 

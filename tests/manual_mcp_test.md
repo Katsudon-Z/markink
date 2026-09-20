@@ -12,7 +12,7 @@
 - 2本目 initialize → -32002 (既存AI名付きで拒否)
 - disconnect → 解放後に再 initialize 成功
 - セッション一致→200 / 不一致→400
-- `app.exe mcp-stdio` (GUI未起動) → 日本語エラー + exit 2
+- `markink.exe mcp-stdio` (GUI未起動) → 日本語エラー + exit 2
 - GUI起動 (有効時) → 127.0.0.1:42110 (WS) + 42120 (HTTP) で待ち受け
 - なお E2E 中に発見した実バグ1件 (修正済み):
   `.setup()` 直下での Tokio コンテキスト外 `from_std` panic → フロントからの
@@ -20,7 +20,7 @@
 
 ## 前提
 
-- ビルド済み `src-tauri/target/release/app.exe` を使用する
+- ビルド済み `src-tauri/target/release/markink.exe` を使用する
 - インターネット遮断環境でも実施する (⑤)
 
 ## ① 単独編集での AI 操作 (一部は自動E2E済み。目視のみ残)
@@ -75,6 +75,6 @@
 
 - [ ] 無効化中は 42110-42129 の待ち受けが無い (リッスン確認)
 - [ ] 待ち受けは 127.0.0.1 のみ (0.0.0.0 では無い)
-- [ ] 設定ファイル (`%LOCALAPPDATA%\com.mdnotepad.app\settings.json`) に文書本文が含まれない
+- [ ] 設定ファイル (`%LOCALAPPDATA%\jp.markink.app\settings.json`) に文書本文が含まれない
 
 結果: ____ / 日付: ____

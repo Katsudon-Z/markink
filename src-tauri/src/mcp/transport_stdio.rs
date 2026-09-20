@@ -62,7 +62,7 @@ fn spawn_stdin_reader() -> mpsc::UnboundedReceiver<String> {
 async fn pump() -> i32 {
     let Some(endpoint) = settings::read_endpoint() else {
         eprintln!(
-            "MDNotepad が起動していないか、AI共同編集 (MCP) が無効です。\n\
+            "markink が起動していないか、AI共同編集 (MCP) が無効です。\n\
              アプリの設定で「AI共同編集」を有効にしてから再接続してください。"
         );
         return 2;
@@ -74,7 +74,7 @@ async fn pump() -> i32 {
     let (ws, _) = match tokio_tungstenite::connect_async(&url).await {
         Ok(pair) => pair,
         Err(e) => {
-            eprintln!("MDNotepad に接続できません ({}). アプリが起動中か確認してください。", e);
+            eprintln!("markink に接続できません ({}). アプリが起動中か確認してください。", e);
             return 2;
         }
     };
@@ -91,7 +91,7 @@ async fn pump() -> i32 {
                 match maybe_line {
                     Some(text) => {
                         if ws_sink.send(Message::Text(text.into())).await.is_err() {
-                            eprintln!("MDNotepad との接続が切れました。");
+                            eprintln!("markink との接続が切れました。");
                             return 1;
                         }
                     }
@@ -112,7 +112,7 @@ async fn pump() -> i32 {
                         }
                     }
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
-                        eprintln!("MDNotepad との接続が閉じられました。");
+                        eprintln!("markink との接続が閉じられました。");
                         return 1;
                     }
                     _ => {}
@@ -132,9 +132,9 @@ mod tests {
     #[test]
     fn detects_stdio_mode_argument() {
         // is_stdio_mode は実際の起動引数に依存するため、判定ロジックだけ確認する
-        let args = vec!["app.exe".to_string(), "mcp-stdio".to_string()];
+        let args = vec!["markink.exe".to_string(), "mcp-stdio".to_string()];
         assert!(args.iter().any(|a| a == "mcp-stdio"));
-        let args2 = vec!["app.exe".to_string(), "C:\\docs\\note.md".to_string()];
+        let args2 = vec!["markink.exe".to_string(), "C:\\docs\\note.md".to_string()];
         assert!(!args2.iter().any(|a| a == "mcp-stdio"));
     }
 }

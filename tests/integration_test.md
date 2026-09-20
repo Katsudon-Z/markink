@@ -13,7 +13,7 @@
 
 ### 2. Tauri設定テスト  
 **ステータス**: PASS ✓
-- 製品名 MDNotepad: 確認済み (requirements.md:94)
+- 製品名 markink: 確認済み (requirements.md:94)
 - Windows専用ウィンドウ設定: 1024x768 (requirements.md:39,95)
 - ポータブル配布対応: bundle.active=false
 

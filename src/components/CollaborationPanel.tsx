@@ -16,7 +16,7 @@ interface CollabPanelProps {
   onStop: () => void;
 }
 
-const DEFAULT_ROOM = 'MDNotepad-room';
+const DEFAULT_ROOM = 'markink-room';
 
 export const CollaborationPanel: React.FC<CollabPanelProps> = ({
   active,

@@ -47,10 +47,11 @@ export function useDocumentActions({
     (content: string, nextTitle: string, nextPath: string | null) => {
       const view = getView();
       if (!view) return;
+      // 先にフォルダを確定させる (画像 nodeView が解決時に最新の dir を読むため)。
       // updateState は dispatch を経由しないため、版を明示的に進める
+      adopt(nextPath, nextTitle, dirName(nextPath));
       view.updateState(createEditorState(content));
       bumpDocVersion('human');
-      adopt(nextPath, nextTitle, dirName(nextPath));
     },
     [getView, adopt]
   );

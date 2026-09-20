@@ -73,7 +73,7 @@ pub(crate) fn validate_api_url(url: &str) -> Result<(), String> {
 
 fn post_completions(url: &str, key: &str, body: &Value, timeout_secs: u64) -> Result<String, String> {
     let mut req = ureq::post(url).timeout(std::time::Duration::from_secs(timeout_secs));
-    req = req.set("User-Agent", "MDNotepad/1.0 (OpenAI-compatible client)");
+    req = req.set("User-Agent", "markink/1.0 (OpenAI-compatible client)");
     if !key.is_empty() {
         req = req.set("Authorization", &format!("Bearer {}", key));
     }

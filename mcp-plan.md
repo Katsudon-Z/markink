@@ -1,11 +1,11 @@
-# MDNotepad AI共同編集 (MCPサーバ) 開発計画
+# markink AI共同編集 (MCPサーバ) 開発計画
 
 対象要件: requirements.md 第10章 (AI共同編集)
 前提: リアルタイム共同編集 (9章) は実装済み。Yjs + Awareness + ProseMirror プラグインで参加者カーソルを表示中。
 
 ## 1. 目標
 
-- MDNotepad 本体が **MCPサーバ** となり、AI客户端 (Claude Desktop / Cursor / opencode など) が **人間参加者と同じ立場** で編集中ドキュメントを閲覧・編集できる。
+- markink 本体が **MCPサーバ** となり、AI客户端 (Claude Desktop / Cursor / opencode など) が **人間参加者と同じ立場** で編集中ドキュメントを閲覧・編集できる。
 - AI の編集は人間の画面へリアルタイム反映され、**カーソル名ラベルには AI 名** (例: `AI: Claude Desktop`) を表示する。
 - 同時参加は **AI 1本限定**。追加の接続は拒否する。
 - 通信は **localhost のみ**。アプリ自身はインターネットへ文書を送らない (非機能要件 40-42, 49 を維持)。
@@ -14,7 +14,7 @@
 
 ```
 AI客户端 (Claude Desktop 等)
-  │ ①stdio: app.exe mcp-stdio … stdin/stdout JSON-RPC (別プロセスだが「管」だけ)
+  │ ①stdio: markink.exe mcp-stdio … stdin/stdout JSON-RPC (別プロセスだが「管」だけ)
   │ ②HTTP:  POST http://127.0.0.1:42110/mcp (+任意トークン)
   ▼
 Rust バックエンド (GUI プロセス)  src-tauri/src/mcp/   ← MCP プロトコルとセッションの本体
@@ -95,7 +95,7 @@ Rust バックエンド (GUI プロセス)  src-tauri/src/mcp/   ← MCP プロ�
 - `mcp/transport_stdio.rs`: エントリ分岐を `lib.rs::run()` の先頭 (single-instance **登録前**) に置く。接続先 (GUI プロセスの localhost WS) がない場合は原因付きエラーで終了。
 - `mcp/transport_ws.rs`: 対 stdio ブリッジ用 WS (127.0.0.1、トークン照合、close でスロット解放)。
 - 設定の永続化: `settings.rs` 新設 (`%LOCALAPPDATA%/<identifier>/settings.json`、AppHandle 無しで解決 = stdio プロセスからも読める。SMB に置かない)。`mcpEnabled`, `mcpToken`, `aiAutoSave`。エンドポイントファイル `mcp.json` (実ポート+トークン) も同じ場所へ。
-- テスト: handshake / tools/list / 不正メッセージ / 2本目拒否 (connection.rs をモック駆動) + **GUI 起動中に `app.exe mcp-stdio` を別プロセスで実行しても stdio が生き続ける回帰テスト** (手動)。
+- テスト: handshake / tools/list / 不正メッセージ / 2本目拒否 (connection.rs をモック駆動) + **GUI 起動中に `markink.exe mcp-stdio` を別プロセスで実行しても stdio が生き続ける回帰テスト** (手動)。
 
 ### M2: リクエストブリッジと読み取りツール
 - `mcp/gateway.rs`: `EditorGateway` トレイト (async request → response)。実装は `mcp:request` emit → `mcp_response` 受信まで oneshot 待機 (タイムアウト 30 秒)。WebView 応答不可はエラー応答。proto/connection はモックゲートウェイでテスト可能にする。
@@ -129,7 +129,7 @@ Rust バックエンド (GUI プロセス)  src-tauri/src/mcp/   ← MCP プロ�
 - テスト: ループバック以外拒否 (bind 検証)、トークン不一致拒否、UI 状態遷移 (vitest / 実機確認)。
 
 ### M6: E2E 検証とドキュメント
-- 接続手順書 (README or docs): Claude Desktop (`claude_desktop_config.json` に `app.exe mcp-stdio`)、Cursor / opencode (stdio 共通)、HTTP 設定例。
+- 接続手順書 (README or docs): Claude Desktop (`claude_desktop_config.json` に `markink.exe mcp-stdio`)、Cursor / opencode (stdio 共通)、HTTP 設定例。
 - 実機検証: ①単独編集で AI 挿入 / 置換 / カーソル確認 ②2端末共同編集 + AI で AI 編集が他端末へ同期・AI ラベル表示 ③AI 編集を人間の Ctrl+Z で取消 ④2本目 AI 拒否 ⑤インターネット遮断環境で全機能。
 - 性能: 5万文字文書で `get_document` / 編集適用の体感遅延を確認 (目標 <200ms 往復、長文の read は切詰め)。
 - requirements.md との突合表 (未実装項目の明示)。

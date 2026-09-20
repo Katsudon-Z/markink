@@ -9,24 +9,28 @@ interface ToolbarProps {
   onToggleComments: () => void;
 }
 
-export const Toolbar = React.memo(function Toolbar({
-  onFormat,
-  showComments,
-  onToggleComments
-}: ToolbarProps) {
-  const [linkInputShown, setLinkInputShown] = useState(false);
-  const [href, setHref] = useState('');
-  const [otherOpen, setOtherOpen] = useState(false);
-  const otherRef = useRef<HTMLSpanElement>(null);
+/** ツールバー内のドロップダウンメニュー (その他・表)。外側クリック・Escape で閉じる */
+function ToolbarMenu({
+  label,
+  title,
+  items,
+  extra
+}: {
+  label: string;
+  title: string;
+  items: { id: string; label: string; title: string; onSelect: () => void }[];
+  extra?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
 
-  // その他メニューは外側クリック・Escape で閉じる
   useEffect(() => {
-    if (!otherOpen) return;
+    if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (otherRef.current && !otherRef.current.contains(e.target as Node)) setOtherOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOtherOpen(false);
+      if (e.key === 'Escape') setOpen(false);
     };
     document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey, true);
@@ -34,7 +38,49 @@ export const Toolbar = React.memo(function Toolbar({
       document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('keydown', onKey, true);
     };
-  }, [otherOpen]);
+  }, [open ]);
+
+  return (
+    <span ref={ref} className="toolbar-other">
+      <button
+        className="toolbar-button"
+        title={title}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {label} ▾
+      </button>
+      {open && (
+        <span className="toolbar-other-menu" role="menu">
+          {items.map((tool) => (
+            <button
+              key={tool.id}
+              className="toolbar-button"
+              title={tool.title}
+              aria-label={tool.title}
+              onClick={() => {
+                tool.onSelect();
+                setOpen(false);
+              }}
+            >
+              {tool.label}
+            </button>
+          ))}
+          {extra}
+        </span>
+      )}
+    </span>
+  );
+}
+
+export const Toolbar = React.memo(function Toolbar({
+  onFormat,
+  showComments,
+  onToggleComments
+}: ToolbarProps) {
+  const [linkInputShown, setLinkInputShown] = useState(false);
+  const [href, setHref] = useState('');
 
   const handleApplyLink = () => {
     onFormat('link', { href: href.trim() });
@@ -42,8 +88,10 @@ export const Toolbar = React.memo(function Toolbar({
     setLinkInputShown(false);
   };
 
-  const mainFormats = FORMATS.filter((tool) => tool.inToolbar !== false);
-  const otherFormats = FORMATS.filter((tool) => tool.inToolbar === false);
+  const mainFormats = FORMATS.filter((tool) => !tool.menu);
+  const otherFormats = FORMATS.filter((tool) => tool.menu === 'other');
+  const tableFormats = FORMATS.filter((tool) => tool.menu === 'table');
+  const dateFormats = FORMATS.filter((tool) => tool.menu === 'date');
 
   return (
     <div className="toolbar">
@@ -59,46 +107,52 @@ export const Toolbar = React.memo(function Toolbar({
         </button>
       ))}
 
-      {otherFormats.length > 0 && (
-        <span ref={otherRef} className="toolbar-other">
-          <button
-            className="toolbar-button"
-            title="その他の書式"
-            aria-haspopup="menu"
-            aria-expanded={otherOpen}
-            onClick={() => setOtherOpen((v) => !v)}
-          >
-            その他 ▾
-          </button>
-          {otherOpen && (
-            <span className="toolbar-other-menu" role="menu">
-              {otherFormats.map((tool) => (
-                <button
-                  key={tool.id}
-                  className="toolbar-button"
-                  title={tool.title}
-                  aria-label={tool.title}
-                  onClick={() => {
-                    onFormat(tool.id);
-                    setOtherOpen(false);
-                  }}
-                >
-                  {tool.label}
-                </button>
-              ))}
-            </span>
-          )}
-        </span>
+      {tableFormats.length > 0 && (
+        <ToolbarMenu
+          label="表"
+          title="表の操作"
+          items={tableFormats.map((tool) => ({
+            ...tool,
+            onSelect: () => onFormat(tool.id)
+          }))}
+        />
       )}
 
-      <button
-        className={showComments ? 'toolbar-button toolbar-button-active' : 'toolbar-button'}
-        title="HTMLコメントの表示と非表示を切り替えます"
-        aria-pressed={showComments}
-        onClick={onToggleComments}
-      >
-        コメント表示
-      </button>
+      {dateFormats.length > 0 && (
+        <ToolbarMenu
+          label="日付"
+          title="日付・時刻の挿入"
+          items={dateFormats.map((tool) => ({
+            ...tool,
+            onSelect: () => onFormat(tool.id)
+          }))}
+        />
+      )}
+
+      {(otherFormats.length > 0) && (
+        <ToolbarMenu
+          label="その他"
+          title="その他の書式"
+          items={otherFormats.map((tool) => ({
+            ...tool,
+            onSelect: () => onFormat(tool.id)
+          }))}
+          extra={
+            <button
+              className={
+                showComments ? 'toolbar-button toolbar-button-active' : 'toolbar-button'
+              }
+              title="HTMLコメントの表示と非表示を切り替えます"
+              aria-pressed={showComments}
+              onClick={() => {
+                onToggleComments();
+              }}
+            >
+              {showComments ? '✓ コメント表示' : 'コメント表示'}
+            </button>
+          }
+        />
+      )}
 
       {linkInputShown && (
         <span className="toolbar-link-input">

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 /// tauri.conf.json の identifier と一致させる (テストで検証)
-pub const APP_IDENTIFIER: &str = "com.mdnotepad.app";
+pub const APP_IDENTIFIER: &str = "jp.markink.app";
 
 /// エディタ起点のAI呼び出し (opencode serve) の既定値
 pub const DEFAULT_AI_BACKEND_URL: &str = "http://127.0.0.1:4096";
@@ -57,6 +57,8 @@ pub struct Settings {
     pub font_size: f64,
     /// エディタのフォントファミリ (CSS値。空なら既定)。
     pub font_family: String,
+    /// 画像パスの記録方式: "relative" (assetsへコピー。既定) | "absolute" (元の場所を参照)
+    pub image_path_mode: String,
 }
 
 impl Default for Settings {
@@ -80,16 +82,21 @@ impl Default for Settings {
             line_numbers: true,
             font_size: 14.0,
             font_family: String::new(),
+            image_path_mode: "relative".to_string(),
         }
     }
 }
 
 /// Tauri の app_local_data_dir と同じ場所 (AppHandle 無しで解決可能)
+/// LOCALAPPDATA が無い制約環境でも、カレント(SMB共有の可能性あり)には書かない。
+/// 必ずローカル一時領域へ落とす。
 pub fn local_dir() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(APP_IDENTIFIER)
+    if let Some(base) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+        if !base.as_os_str().is_empty() {
+            return base.join(APP_IDENTIFIER);
+        }
+    }
+    std::env::temp_dir().join(APP_IDENTIFIER)
 }
 
 pub fn settings_path() -> PathBuf {
@@ -184,6 +191,16 @@ pub fn set_line_numbers(enabled: bool) -> Result<(), String> {
     save(&s)
 }
 
+#[tauri::command]
+pub fn set_image_path_mode(mode: String) -> Result<(), String> {
+    if mode != "relative" && mode != "absolute" {
+        return Err("画像パスは relative か absolute で指定してください".to_string());
+    }
+    let mut s: Settings = load();
+    s.image_path_mode = mode;
+    save(&s)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorFont {
@@ -266,5 +283,6 @@ mod tests {
         assert!(parsed.ai_api_key.is_empty());
         assert!(parsed.ai_api_model.is_empty());
         assert!(parsed.user_name.is_empty());
+        assert_eq!(parsed.image_path_mode, "relative");
     }
 }

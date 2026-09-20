@@ -1,11 +1,11 @@
-# MDNotepad AI共同編集 (MCP) 接続手順書
+# markink AI共同編集 (MCP) 接続手順書
 
-MDNotepad 本体が MCPサーバになり、AIアシスタントが人間と同じように文書を読み書きします。
+markink 本体が MCPサーバになり、AIアシスタントが人間と同じように文書を読み書きします。
 通信は PC 内部 (localhost) のみで完結し、文書がインターネットへ送信されることはありません。
 
-## 1. 有効化 (MDNotepad 側)
+## 1. 有効化 (markink 側)
 
-1. MDNotepad を起動し、ヘッダーの「AI接続」ボタンを押す
+1. markink を起動し、ヘッダーの「AI接続」ボタンを押す
 2. 「有効化」を ON にする (ON の間だけ localhost で待ち受けます)
 3. 状態が「待機中」になれば準備完了
 
@@ -17,8 +17,8 @@ AIクライアントの設定ファイルに以下を登録します
 ```json
 {
   "mcpServers": {
-    "mdnotepad": {
-      "command": "C:\\MDNotepad\\app.exe",
+    "markink": {
+      "command": "Z:\\Apps\\markink\\markink.exe",
       "args": ["mcp-stdio"]
     }
   }
@@ -34,9 +34,10 @@ AIクライアントの設定ファイルに以下を登録します
 | Cline (VS Code) | 拡張機能の「MCP Servers」→「Configure MCP Servers」(`cline_mcp_settings.json`) |
 | opencode | `opencode.json` の `mcp` に `"type": "local"` で登録 (下記参照) |
 
-- `command` はお使いの `app.exe` の実際のパスに置き換えてください
+- `command` はお使いの `markink.exe` の実際のパスに置き換えてください
+  (ローカルでもネットワークドライブでも可。例: `C:\Tools\markink\markink.exe`、`Z:\Apps\markink\markink.exe`)
   (JSON では `\` を `\\` と2重に書きます)
-- 先に MDNotepad を起動して有効化しておく必要があります
+- 先に markink を起動して有効化しておく必要があります
 
 ## 3. 接続方法2: Streamable HTTP (opencode / Cursor など)
 
@@ -57,17 +58,17 @@ stdio 方式 (推奨。ポート番号の確認が不要です):
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "mdnotepad": {
+    "markink": {
       "type": "local",
-      "command": ["D:\\MDNotepad\\app.exe", "mcp-stdio"],
+      "command": ["Z:\\Apps\\markink\\markink.exe", "mcp-stdio"],
       "enabled": true
     }
   }
 }
 ```
 
-- `command` は配列形式、`app.exe` は実際のパスに置き換えます (JSON では `\` を `\\` と書きます)
-- 先に MDNotepad を起動して「AI接続」を有効化しておく必要があります
+- `command` は配列形式、`markink.exe` は実際のパスに置き換えます (ローカルでもネットワークドライブでも可。JSON では `\` を `\\` と書きます)
+- 先に markink を起動して「AI接続」を有効化しておく必要があります
   (未起動のまま接続すると、その旨のエラーで終了します)
 
 HTTP 方式 (パネルに表示される URL・トークンを使います):
@@ -76,10 +77,10 @@ HTTP 方式 (パネルに表示される URL・トークンを使います):
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "mdnotepad": {
+    "markink": {
       "type": "remote",
       "url": "http://127.0.0.1:42120/mcp",
-      "headers": { "Authorization": "Bearer {env:MDNOTEPAD_MCP_TOKEN}" },
+      "headers": { "Authorization": "Bearer {env:MARKINK_MCP_TOKEN}" },
       "oauth": false,
       "enabled": true
     }
@@ -87,7 +88,7 @@ HTTP 方式 (パネルに表示される URL・トークンを使います):
 }
 ```
 
-- `MDNOTEPAD_MCP_TOKEN` 環境変数にパネルのトークンを設定します (設定ファイルへの直書きを避けるため)
+- `MARKINK_MCP_TOKEN` 環境変数にパネルのトークンを設定します (設定ファイルへの直書きを避けるため)
 - `oauth: false` は、トークン方式なのに OAuth フローへ誘導されるのを防ぐための指定です
 - ポート (上例の 42120) は起動ごとに変わることがあるため、パネルで確認してください
 
@@ -127,7 +128,7 @@ HTTP 方式 (パネルに表示される URL・トークンを使います):
 
 | 症状 | 対処 |
 |---|---|
-| 接続できない (stdio) | MDNotepad が起動し、有効化が ON か確認。`command` のパスが正しいか確認 |
+| 接続できない (stdio) | markink が起動し、有効化が ON か確認。`command` のパスが正しいか確認 |
 | 401 Unauthorized (HTTP) | トークンを貼り直す。「トークンを再生成」後は古いトークンは無効 |
 | 2つ目の AI が拒否される | 仕様です。パネルの「切断する」で1つ目を切断してください |
 | ツールがタイムアウトする | エディタのウィンドウが開いているか確認。IME 変換中は最大2秒待ってから適用されます |

@@ -24,8 +24,12 @@ struct AutosaveMeta {
 }
 
 /// 自動保存ファイルの場所 (ローカル一時領域)
+/// app_local_data_dir が取れない制約環境でも panic せず一時領域へ落とす。
 fn autosave_dir(app: &tauri::AppHandle) -> PathBuf {
-    let dir = app.path().app_local_data_dir().unwrap();
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("jp.markink.app"));
     let _ = fs::create_dir_all(&dir);
     dir
 }

@@ -57,7 +57,12 @@ export const Editor = React.memo(function Editor({
 
   useEffect(() => {
     if (!editorRef.current) return;
-    const view = createEditorView(editorRef.current, undefined, () => onChangeRef.current?.());
+    const view = createEditorView(
+      editorRef.current,
+      undefined,
+      () => onChangeRef.current?.(),
+      () => getDocDirRef.current?.() ?? null
+    );
     const onFile = handleImageDropPasteFactory(() => getDocDirRef.current?.() ?? null);
 
     const handleDrop = (e: DragEvent) => {
@@ -107,15 +112,34 @@ export const Editor = React.memo(function Editor({
       }
     };
 
+    // Ctrl+クリック: リンクを外部ブラウザで開く (通常クリックはカーソル配置)。
+    // エディタ内で遷移させない (WebViewが乗っ取られるのを防ぐ)。
+    const handleLinkClick = (e: MouseEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const anchor = (e.target as HTMLElement | null)?.closest?.(
+        'a[href]'
+      ) as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = anchor.getAttribute('href') ?? '';
+      if (!/^(https?:|mailto:)/i.test(href)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void import('@tauri-apps/plugin-opener')
+        .then(({ openUrl }) => openUrl(href))
+        .catch(() => {});
+    };
+
     view.dom.addEventListener('drop', handleDrop);
     view.dom.addEventListener('dragover', handleDragOver);
     view.dom.addEventListener('keydown', handleKeyDown, true);
+    view.dom.addEventListener('click', handleLinkClick, true);
 
     onReadyRef.current?.(view);
     return () => {
       view.dom.removeEventListener('drop', handleDrop);
       view.dom.removeEventListener('dragover', handleDragOver);
       view.dom.removeEventListener('keydown', handleKeyDown, true);
+      view.dom.removeEventListener('click', handleLinkClick, true);
       view.destroy();
     };
   }, []);

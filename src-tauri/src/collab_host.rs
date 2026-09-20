@@ -21,7 +21,7 @@ use futures_util::{SinkExt, StreamExt};
 use crate::collab_relay;
 
 pub const SIGNAL_PORT: u16 = 42100;
-const MARKER_DIR: &str = ".mdnotepad";
+const MARKER_DIR: &str = ".markink";
 const MARKER_FILE: &str = "signaling.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -419,7 +419,10 @@ fn release_server() {
 }
 
 fn fallback_dir(app: &tauri::AppHandle) -> PathBuf {
-    let dir = app.path().app_local_data_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("jp.markink.app"));
     std::fs::create_dir_all(&dir).ok();
     dir
 }
@@ -492,7 +495,7 @@ mod tests {
                 }
             }
         });
-        let marker_dir = dir.join(".mdnotepad");
+        let marker_dir = dir.join(".markink");
         std::fs::create_dir_all(&marker_dir).unwrap();
         std::fs::write(
             marker_dir.join("signaling.json"),

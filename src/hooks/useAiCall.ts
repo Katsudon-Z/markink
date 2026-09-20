@@ -43,10 +43,12 @@ export function useAiCall({ getView, notifyHuman, onOpenSettings }: UseAiCallOpt
   const [directBusy, setDirectBusy] = useState(false);
   const [aiElapsed, setAiElapsed] = useState(0);
 
-  // アプリ起動時にAIサーバを自動開始 (有効時のみ)
+  // 起動時は状態だけ読む。serve の起動は初回AI利用まで遅延させる
+  // (opencode の起動は重く、毎回のアプリ起動を遅くするため)。
+  // ai_ask 内部の ensure_running が必要時に起動する。
   useEffect(() => {
     void ipc
-      .aiAutostart()
+      .aiStatus()
       .then((st) => setAiEnabled(st.enabled))
       .catch(() => {});
   }, []);

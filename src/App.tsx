@@ -5,9 +5,10 @@ import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
 import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
+import { insertImageAt } from './lib/prosemirror/image';
 import { bumpDocVersion } from './lib/mcp/docVersion';
 import { AI_CURSOR_COLOR } from './lib/mcp/presence';
-import { baseName, dirName, stem as stemOfPath } from './lib/path';
+import { baseName, dirName, stem as stemOfPath, relativePath, toFileUri } from './lib/path';
 import { ipc } from './lib/ipc';
 import { useAutosave } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
@@ -20,12 +21,15 @@ import { AiContextMenu } from './components/AiContextMenu';
 import { AiResultDialog } from './components/AiResultDialog';
 import { RightPane } from './components/RightPane';
 import { aiModeLabel } from './lib/ai/context';
+import { MCP_FEATURE_ENABLED } from './lib/features';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showAi, setShowAi] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // 起動時の初期画面 (ロゴ + 新規作成/開く)。ファイルを開いたら閉じる
+  const [showStartScreen, setShowStartScreen] = useState(true);
   const [suggestedRoom, setSuggestedRoom] = useState<string | undefined>(undefined);
   // 前回保存していない内容の復元機能 (既定: 無効)
   const [restoreEnabled, setRestoreEnabled] = useState(false);
@@ -34,6 +38,8 @@ function App() {
   // 共同編集で表示する自分の名前 (設定値。空なら自動生成)
   const userNameRef = useRef('');
   const getUserName = useCallback(() => userNameRef.current, []);
+  // 画像パスの記録方式 (設定値。ファイル選択からの挿入に適用)
+  const imagePathModeRef = useRef('relative');
   // 行番号ガターの表示 (設定値。既定は表示)
   const [showLineNumbers, setShowLineNumbers] = useState(true);
   // エディタの文字サイズ・種類 (設定値)
@@ -89,6 +95,7 @@ function App() {
         restoreEnabledRef.current = s.restoreEnabled;
         setRestoreEnabled(s.restoreEnabled);
         userNameRef.current = s.userName ?? '';
+        imagePathModeRef.current = s.imagePathMode === 'absolute' ? 'absolute' : 'relative';
         setShowLineNumbers(s.lineNumbers ?? true);
         if (Number.isFinite(s.fontSize) && s.fontSize > 0) setFontSizePx(s.fontSize);
         setFontFamily(s.fontFamily ?? '');
@@ -169,6 +176,9 @@ function App() {
   });
   collabRef.current = collab;
 
+  // 未保存文書で共同編集を開始しようとしたときの保存促進モーダル
+  const [showSavePrompt, setShowSavePrompt] = useState(false);
+
   // 共同編集が始まったら上部の共同編集パネルを自動で閉じる (状態は右端バッジで示す)
   const collabActiveRef = useRef(false);
   useEffect(() => {
@@ -188,6 +198,7 @@ function App() {
   docRef.current = doc;
 
   useStartupFile((path) => {
+    setShowStartScreen(false);
     void docRef.current?.openByPath(path);
   });
 
@@ -276,6 +287,57 @@ function App() {
       applyFormat(viewRef.current, format, { href: href.trim() });
       return;
     }
+    // 画像挿入はファイル選択ダイアログを使う非同期フロー。
+    // 画像（リンク）: コピーなし。設定で相対 (既定) /絶対を選択。
+    // 画像（コピー）: assets/ へコピーして相対参照 (常に)。
+    if (format === 'image-link' || format === 'image-copy') {
+      void (async () => {
+        try {
+          const { open } = await import('@tauri-apps/plugin-dialog');
+          const selected = await open({
+            filters: [
+              { name: '画像', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }
+            ]
+          });
+          const filePath = Array.isArray(selected) ? selected[0] : selected;
+          if (!filePath) return;
+          const view = viewRef.current;
+          if (!view) return;
+          if (format === 'image-copy') {
+            const dir = dirRef.current;
+            if (!dir) {
+              window.alert('画像をコピーするには先に文書を保存してください');
+              return;
+            }
+            const bytes = await ipc.readFileBytes(filePath);
+            const base = filePath.split(/[\\/]/).pop() || 'image.png';
+            const rel = await ipc.writeAsset(dir, `${Date.now()}-${base}`, bytes);
+            const v = viewRef.current;
+            if (v) insertImageAt(v, null, rel);
+            return;
+          }
+          if (imagePathModeRef.current === 'absolute') {
+            insertImageAt(view, null, toFileUri(filePath));
+            return;
+          }
+          const dir = dirRef.current;
+          if (!dir) {
+            window.alert('相対パスで参照するには先に文書を保存してください');
+            return;
+          }
+          const rel = relativePath(dir, filePath);
+          if (!rel) {
+            window.alert('別ドライブのため絶対パスで挿入します');
+            insertImageAt(view, null, toFileUri(filePath));
+            return;
+          }
+          insertImageAt(view, null, rel);
+        } catch (e) {
+          window.alert(String(e));
+        }
+      })();
+      return;
+    }
     applyFormat(viewRef.current, format, payload);
   }, []);
 
@@ -291,7 +353,7 @@ function App() {
     let cancelled = false;
     void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
       if (cancelled) return;
-      getCurrentWindow().setTitle(`${doc.title} - MDNotepad`).catch(() => {});
+      getCurrentWindow().setTitle(`${doc.title} - markink`).catch(() => {});
     });
     return () => {
       cancelled = true;
@@ -327,9 +389,11 @@ function App() {
                       // 元のファイルとして復元し、共同編集のフォルダ情報も引き継ぐ
                       doc.loadMarkdown(data.content, baseName(data.path), data.path);
                       await joinOrSuggest(data.path, dirName(data.path) ?? '', data.room);
+                      setShowStartScreen(false);
                       return;
                     }
                     doc.loadMarkdown(data.content, '復元した文書', null);
+                    setShowStartScreen(false);
                     if (data.room) {
                       setSuggestedRoom(data.room);
                       setShowCollab(true);
@@ -387,7 +451,9 @@ function App() {
           </button>
           <button className="btn" onClick={() => void doc.exportHtml()}>HTML出力</button>
           <button className="btn" onClick={() => setShowCollab((v) => !v)}>共同編集</button>
-          <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
+          {MCP_FEATURE_ENABLED && (
+            <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
+          )}
           <button className="btn" onClick={() => setShowSettings((v) => !v)}>設定</button>
         </div>
         <div className="app-status">
@@ -426,6 +492,11 @@ function App() {
           showCursors={collab.showCursors}
           onShowCursorsChange={collab.setShowCursors}
           onStart={(opts) => {
+            // 未保存の文書には .mdnotepad フォルダ (合流地点) が無いため先に保存させる
+            if (!pathRef.current) {
+              setShowSavePrompt(true);
+              return;
+            }
             void collab.ensure(opts.roomName, opts.signalingUrl).catch((e) => window.alert(String(e)));
           }}
           onStop={() => {
@@ -441,7 +512,7 @@ function App() {
         />
       )}
 
-      {showAi && <AiSettingsPanel onClose={() => setShowAi(false)} />}
+      {showAi && MCP_FEATURE_ENABLED && <AiSettingsPanel onClose={() => setShowAi(false)} />}
 
       {showSettings && (
         <SettingsPanel
@@ -517,6 +588,61 @@ function App() {
         diagnostics={collab.diagnostics}
         aiName={mcp.aiName}
       />
+
+      {showStartScreen && (
+        <div className="start-screen" role="dialog" aria-label="はじめに">
+          <img src="/markink-splash.svg" alt="markink" className="start-logo" />
+          <div className="start-actions">
+            <button
+              className="btn btn-primary btn-large"
+              onClick={() => {
+                doc.newDocument(autosave.discardServerAutosave);
+                setShowStartScreen(false);
+              }}
+            >
+              新規作成
+            </button>
+            <button
+              className="btn btn-large"
+              onClick={() => {
+                void (async () => {
+                  await doc.openDialog();
+                  if (pathRef.current) setShowStartScreen(false);
+                })();
+              }}
+            >
+              開く
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showSavePrompt && (
+        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="save-prompt-title">
+          <div className="restore-dialog">
+            <h2 id="save-prompt-title" className="restore-title">保存が必要です</h2>
+            <p className="restore-message">共同編集を始める前に保存してください。</p>
+            <div className="restore-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setShowSavePrompt(false);
+                  void doc.saveAs(() => {
+                    autosave.discardServerAutosave();
+                    const p = pathRef.current;
+                    if (p) setSuggestedRoom(stemOfPath(p));
+                  });
+                }}
+              >
+                名前を付けて保存
+              </button>
+              <button className="btn" onClick={() => setShowSavePrompt(false)}>
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {aiNotice && (
         <div className="ai-toast" role="status" key={aiNotice.id}>

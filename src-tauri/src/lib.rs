@@ -1,4 +1,4 @@
-// MDNotepad バックエンド: 各関心ごとにモジュール分割し、ここは編成のみを行う
+// markink バックエンド: 各関心ごとにモジュール分割し、ここは編成のみを行う
 mod ai_serve;
 mod autosave;
 mod collab_host;
@@ -29,6 +29,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         // 2重起動時は既存ウィンドウにファイルを開かせる
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             startup::forward_open_file(app, &argv);
@@ -40,6 +41,7 @@ pub fn run() {
             document::write_markdown,
             document::write_text_file,
             document::write_asset,
+            document::read_file_bytes,
             document::set_document_path,
             document::get_current_path,
             document::get_current_dir,
@@ -59,6 +61,7 @@ pub fn run() {
             settings::set_restore_enabled,
             settings::set_user_name,
             settings::set_line_numbers,
+            settings::set_image_path_mode,
             settings::set_editor_font,
             mcp::mcp_autostart,
             mcp::mcp_set_enabled,

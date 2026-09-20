@@ -3,6 +3,7 @@ import { schema } from '../prosemirror/editor';
 
 const HTML_STYLE =
   "body{font-family:'Segoe UI',Meiryo,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;line-height:1.7;}" +
+  'h1,h2{border-bottom:1px solid #ddd;padding-bottom:.2em;}' +
   'img{max-width:100%;}pre{background:#f5f5f5;padding:1em;border-radius:6px;overflow-x:auto;}' +
   'blockquote{border-left:3px solid #ddd;margin:.5em 0;padding-left:1em;color:#555;}' +
   'table{border-collapse:collapse;}td,th{border:1px solid #ccc;padding:4px 8px;}';

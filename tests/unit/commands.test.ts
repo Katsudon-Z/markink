@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { EditorView } from 'prosemirror-view';
 import { createEditorState, markdownSerializer } from '../../src/lib/prosemirror/editor';
-import { FORMATS, getFormat, applyFormat } from '../../src/lib/prosemirror/commands';
+import { FORMATS, getFormat, applyFormat, warekiText } from '../../src/lib/prosemirror/commands';
 
 function createView() {
   const el = document.createElement('div');

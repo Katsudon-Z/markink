@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MDNotepad",
+  "productName": "markink",
   "version": "0.1.0",
-  "identifier": "com.mdnotepad.app",
+  "identifier": "jp.markink.app",
   "build": {
     "frontendDist": "../dist",
     "beforeDevCommand": "npm run dev",
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "MDNotepad",
+        "title": "markink",
         "width": 1024,
         "height": 768,
         "resizable": true,

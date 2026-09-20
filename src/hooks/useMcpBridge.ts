@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ipc } from '../lib/ipc';
+import { MCP_FEATURE_ENABLED } from '../lib/features';
 import { clearAiCursor, setAiName as setPresenceAiName } from '../lib/mcp/presence';
 import {
   getDocVersion,
@@ -23,6 +24,8 @@ export function useMcpBridge(ctx: ToolContext) {
   const aiNameRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // MCP機能は非表示中のため、自動起動も待受けも行わない (実装は残置)
+    if (!MCP_FEATURE_ENABLED) return;
     let alive = true;
     const unlistens: (() => void)[] = [];
     void (async () => {

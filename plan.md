@@ -1,11 +1,11 @@
-# MDNotepad 開発計画
+# markink 開発計画
 
 ## 0. 前提確認
 requirements.md 9章のリアルタイム共同編集は、2026-09-14時点の確認で「本体拡張・未実装」表記が削除され、本体に組み込む要件と明確化された。
 本計画では、ユーザーの要請に従い初期版スコープに**リアルタイム共同編集を必須機能**として含める。
 
 ## 1. プロジェクト概要
-製品名: MDNotepad  
+製品名: markink  
 目的: プログラミング経験がない人でも Word 的な操作で Markdown (.md) を作成・編集できる Windows 専用デスクトップアプリ。初期版からリアルタイム共同編集対応  
 主要技術: Tauri + ProseMirror + Yjs/WebRTC
 
@@ -25,7 +25,7 @@ requirements.md 9章のリアルタイム共同編集は、2026-09-14時点の�
 
 ### 3.1 全体構成
 ```
-MDNotepad (Tauri)
+markink (Tauri)
 ├─ Frontend (WebView)
 │  ├─ ProseMirror Editor (WYSIWYG)
 │  ├─ Toolbar (アイコン版、ツールチップ付き)
@@ -123,4 +123,4 @@ MDNotepad (Tauri)
 
 ## 9. 次のアクション
 Phase 1 のプロジェクト初期化を開始。Tauri + ProseMirror + Yjs/WebRTC の最小構成を作成し、デザインに準拠したツールバーと共同編集セッション開始 UI を並行して実装する。
-製品名は MDNotepad に統一 - requirements.md:94
+製品名は markink に統一 - requirements.md:94

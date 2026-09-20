@@ -54,6 +54,16 @@ const tokenizer = defaultMarkdownParser.tokenizer;
 tokenizer.enable('table');
 tokenizer.inline.ruler.before('html_inline', 'mdn_comment', commentRule);
 
+// file:// リンクの画像化を許可する (既定の validateLink は file: を弾くため、
+// 保存→読込で画像がテキストに戻ってしまう)。危険な javascript:/vbscript: と
+// data:text/html は引き続き拒否する。ローカルアプリの自ファイル参照は安全。
+tokenizer.validateLink = (url: string): boolean => {
+  const str = url.trim().toLowerCase();
+  if (/^(vbscript|javascript):/.test(str)) return false;
+  if (/^data:text\/html/.test(str)) return false;
+  return true;
+};
+
 // 表のセル内容を段落で包むため、トークン列を加工してからパーサへ渡す
 const wrappedTokenizer = {
   parse: (text: string, env?: object): TokenLike[] =>

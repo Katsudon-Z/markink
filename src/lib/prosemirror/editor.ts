@@ -4,6 +4,7 @@ import { schema } from './schema';
 import { markdownParser, markdownSerializer } from './markdown';
 import { createBasePlugins } from './plugins';
 import { recordCursor } from '../mcp/docVersion';
+import { imageNodeView } from './image';
 
 export { undo, redo } from 'prosemirror-history';
 export { schema, markdownParser, markdownSerializer };
@@ -21,13 +22,18 @@ export function createEditorState(initialMarkdown?: string) {
 export function createEditorView(
   element: HTMLElement,
   state?: EditorState,
-  onUpdate?: () => void
+  onUpdate?: () => void,
+  getDocDir?: () => string | null
 ): EditorView {
   const editorState = state || createEditorState();
   const view = new EditorView(element, {
     state: editorState,
     // スペルチェックは日本語入力の速度と変換候補の挙動に影響するため無効化する
     attributes: { spellcheck: 'false' },
+    // 画像は保存形式に関わらずローカル解決して描画する (相対/file/リモート対応)
+    nodeViews: {
+      image: imageNodeView(() => getDocDir?.() ?? null)
+    },
     dispatchTransaction(tr) {
       const newState = view.state.apply(tr);
       view.updateState(newState);

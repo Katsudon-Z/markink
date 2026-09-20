@@ -1,4 +1,4 @@
-MDNotepad 開発版 アクセス情報
+markink 開発版 アクセス情報
 
 WSL2環境:
 - WSL内部IP: 172.29.243.183

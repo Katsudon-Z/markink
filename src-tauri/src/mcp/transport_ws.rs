@@ -404,7 +404,7 @@ mod tests {
         });
         sink.send(Message::Text(init.to_string().into())).await.unwrap();
         let v = read_reply_with_id(&mut source, 1).await;
-        assert_eq!(v["result"]["serverInfo"]["name"], "MDNotepad");
+        assert_eq!(v["result"]["serverInfo"]["name"], "markink");
 
         let call = json!({
             "jsonrpc": "2.0", "id": 2, "method": "tools/call",
@@ -507,6 +507,6 @@ mod tests {
         });
         sink.send(Message::Text(init.to_string().into())).await.unwrap();
         let v = read_reply_with_id(&mut source, 1).await;
-        assert_eq!(v["result"]["serverInfo"]["name"], "MDNotepad");
+        assert_eq!(v["result"]["serverInfo"]["name"], "markink");
     }
 }

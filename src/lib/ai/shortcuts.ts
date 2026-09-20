@@ -29,7 +29,8 @@ export const EDITOR_SHORTCUTS: EditorShortcut[] = [
   { keys: 'Ctrl + Z / Ctrl + Y', label: '元に戻す / やり直し' },
   { keys: 'Enter', label: 'リストで次の項目' },
   { keys: 'Shift + Enter', label: '段落内改行' },
-  { keys: 'Tab / Shift + Tab', label: '表のセル移動' }
+  { keys: 'Tab / Shift + Tab', label: '表のセル移動' },
+  { keys: 'Ctrl + クリック', label: 'リンクを外部ブラウザで開く' }
 ];
 
 /**
