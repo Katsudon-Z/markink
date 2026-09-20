@@ -30,11 +30,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        // 2重起動時は既存ウィンドウにファイルを開かせる
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            startup::forward_open_file(app, &argv);
-        }))
+        // 複数起動を許可する (単一起動プラグインは使わない)。
+        // 文書フォルダごとに .markink マーカーで合流するため、別文書は干渉しない。
         .manage(CurrentDocument::default())
+        // 終了時にAIデーモンを掃除する (孤児化すると次回起動時のポート競合になる)
+        .on_window_event(|_win, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                ai_serve::shutdown();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // document
             document::read_markdown,
@@ -75,7 +79,6 @@ pub fn run() {
             mcp::notify::mcp_doc_changed,
             mcp::gateway::mcp_response,
             // エディタ起点のAI呼び出し (opencode serve)
-            ai_serve::ai_autostart,
             ai_serve::ai_status,
             ai_serve::ai_set_enabled,
             ai_serve::ai_set_config,

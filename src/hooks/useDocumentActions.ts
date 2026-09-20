@@ -156,34 +156,22 @@ export function useDocumentActions({
   };
 }
 
-/** .md ダブルクリック起動と二重起動時のファイル受け渡し */
+/** .md ダブルクリック起動時のファイル受け渡し (各プロセスが自分の引数を開く) */
 export function useStartupFile(onOpen: (path: string) => void) {
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
 
   useEffect(() => {
     let alive = true;
-    let unlisten: (() => void) | undefined;
 
     void (async () => {
       const startup = await ipc.takeStartupFile().catch(() => null);
       if (!alive) return;
       if (startup) onOpenRef.current(startup);
-
-      const { listen } = await import('@tauri-apps/api/event');
-      const stop = await listen<string>('open-file', (e) => {
-        if (alive) onOpenRef.current(e.payload);
-      });
-      if (alive) {
-        unlisten = stop;
-      } else {
-        stop();
-      }
     })();
 
     return () => {
       alive = false;
-      unlisten?.();
     };
   }, []);
 }

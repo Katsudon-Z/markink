@@ -30,35 +30,40 @@ struct DaemonPid {
     port: u16,
 }
 
-fn pid_file_path() -> PathBuf {
-    settings::local_dir().join("ai-serve.json")
+fn pid_file_path(port: u16) -> PathBuf {
+    settings::local_dir().join(format!("ai-serve-{}.json", port))
 }
 
 fn write_pid_file(pid: u32, port: u16) {
     let _ = std::fs::create_dir_all(settings::local_dir());
     let text = serde_json::to_string(&DaemonPid { pid, port }).unwrap_or_default();
-    let _ = std::fs::write(pid_file_path(), text);
+    let _ = std::fs::write(pid_file_path(port), text);
 }
 
-fn read_pid_file() -> Option<DaemonPid> {
-    std::fs::read_to_string(pid_file_path())
+fn read_pid_file(port: u16) -> Option<DaemonPid> {
+    std::fs::read_to_string(pid_file_path(port))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
 }
 
-pub(crate) fn remove_pid_file() {
-    let _ = std::fs::remove_file(pid_file_path());
+pub(crate) fn remove_pid_file(port: u16) {
+    let _ = std::fs::remove_file(pid_file_path(port));
 }
 
-/// serve デーモンを起動し、health が通るまで待つ
+/// 旧形式のPIDファイル (ポート非対応時代の名残) を掃除する
+pub(crate) fn remove_legacy_pid_file() {
+    let _ = std::fs::remove_file(settings::local_dir().join("ai-serve.json"));
+}
+
+/// serve デーモンを起動する。ポートは呼び出し側で確保済みのこと。
 pub(crate) fn spawn_daemon(bin: &str, port: u16, password: &str) -> Result<std::process::Child, String> {
-    // ポート使用中は孤児 (前回アプリ終了時の取り残し) の回収を試みる
-    if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
-        adopt_stale_daemon(port)?;
-    }
     let log_path = settings::local_dir().join("ai-serve.log");
     let _ = std::fs::create_dir_all(settings::local_dir());
-    let log = std::fs::File::create(&log_path).map_err(|e| e.to_string())?;
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| e.to_string())?;
     let err_log = log.try_clone().map_err(|e| e.to_string())?;
     #[cfg(windows)]
     let mut cmd = {
@@ -85,7 +90,28 @@ pub(crate) fn spawn_daemon(bin: &str, port: u16, password: &str) -> Result<std::
     Ok(child)
 }
 
-/// ポート占有者が自分が取り残したデーモンなら殺して回収する。
+/// 空きポートを探す。複数起動時は設定ポートから順にずらす。
+/// 使用中ポートは孤児 (前回アプリ終了時の取り残し) の回収を試み、
+/// 生きている所有者がいる場合は次へ進む (他インスタンスの邪魔をしない)。
+pub(crate) fn acquire_port(start: u16) -> Result<u16, String> {
+    for port in start..start.saturating_add(10).max(start + 1) {
+        if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_err() {
+            return Ok(port);
+        }
+        if adopt_stale_daemon(port).is_ok() {
+            return Ok(port);
+        }
+    }
+    Err(format!(
+        "空きポートがありません ({}-{})",
+        start,
+        start.saturating_add(9)
+    ))
+}
+
+/// ポート占有者が自分が取り残した孤児なら殺して回収する。
+/// ただし記録上の所有者が生きている場合は別インスタンスの現役デーモンとみなし、
+/// 手を出さずエラーにする (複数起動対応)。
 /// 判定は占有者自身のコマンドラインで行う (`serve --port <port>` を含むか)。
 /// PIDファイルは cmd ラッパーのPIDが残るため所有者比較には使えない
 /// (netstat に出るのは serve 本体のPID)。他人物は殺さずエラーにする。
@@ -94,10 +120,16 @@ fn adopt_stale_daemon(port: u16) -> Result<(), String> {
         "ポート {} は使用中です。別の opencode serve を停止してください",
         port
     );
+    // 記録上の所有者が生きていれば現役とみなして回収しない
+    if let Some(recorded) = read_pid_file(port) {
+        if recorded.port == port && process_command_line(recorded.pid).is_some() {
+            return Err(busy_msg);
+        }
+    }
     let listener = listener_pid(port).ok_or_else(|| busy_msg.clone())?;
     let mut targets = vec![listener];
     // PIDファイルのプロセスも同型なら一緒に殺す (生き残った cmd ラッパー対策)
-    if let Some(recorded) = read_pid_file() {
+    if let Some(recorded) = read_pid_file(port) {
         if recorded.port == port && recorded.pid != listener {
             targets.push(recorded.pid);
         }
@@ -123,7 +155,7 @@ fn adopt_stale_daemon(port: u16) -> Result<(), String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
-    remove_pid_file();
+    remove_pid_file(port);
     Ok(())
 }
 
@@ -244,8 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn own_serve_command_matches_spawn_shapes() {
-        assert!(is_own_serve_command(
+    fn own_serve_command_matches_spawn_shapes() {        assert!(is_own_serve_command(
             "\"C:\\Users\\user\\AppData\\Roaming\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe\"    serve --port 4096 --hostname 127.0.0.1",
             4096
         ));
@@ -261,5 +292,21 @@ mod tests {
             "\"cmd\" /C opencode serve --port 4097 --hostname 127.0.0.1",
             4096
         ));
+    }
+
+    /// 空きポートはそのまま、他者占有のポートは次へずらす (複数起動対応)。
+    /// テスト用に他者が使わない帯域を使う (実 pid ファイルと衝突させない)。
+    #[test]
+    fn acquire_port_skips_foreign_occupant() {
+        let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let busy_port = busy.local_addr().unwrap().port();
+        // 他者占有 (自 serve の形でない) なら殺さず次へ
+        let got = acquire_port(busy_port).expect("次ポートで確保できる");
+        assert!(got > busy_port, "占有ポートを避ける: {} -> {}", busy_port, got);
+        assert!(
+            std::net::TcpStream::connect(format!("127.0.0.1:{}", got)).is_err(),
+            "返されたポートは空いていること"
+        );
+        drop(busy);
     }
 }

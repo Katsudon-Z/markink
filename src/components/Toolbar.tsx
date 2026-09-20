@@ -11,8 +11,6 @@ interface ToolbarProps {
 }
 
 /** ツールバー内のドロップダウンメニュー (その他・表)。外側クリック・Escape で閉じる */
-export const ToolbarMenu = MenuDropdown;
-
 export const Toolbar = React.memo(function Toolbar({
   onFormat,
   showComments,
@@ -47,7 +45,7 @@ export const Toolbar = React.memo(function Toolbar({
       ))}
 
       {tableFormats.length > 0 && (
-        <ToolbarMenu
+        <MenuDropdown
           label="表"
           title="表の操作"
           items={tableFormats.map((tool) => ({
@@ -58,7 +56,7 @@ export const Toolbar = React.memo(function Toolbar({
       )}
 
       {dateFormats.length > 0 && (
-        <ToolbarMenu
+        <MenuDropdown
           label="日付"
           title="日付・時刻の挿入"
           items={dateFormats.map((tool) => ({
@@ -69,7 +67,7 @@ export const Toolbar = React.memo(function Toolbar({
       )}
 
       {(otherFormats.length > 0) && (
-        <ToolbarMenu
+        <MenuDropdown
           label="その他"
           title="その他の書式"
           items={otherFormats.map((tool) => ({

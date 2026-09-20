@@ -1,8 +1,6 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use tauri::{Emitter, Manager};
-
 /// .md 関連付けのダブルクリック起動用: 起動引数からファイルを受け取る
 static STARTUP_FILE: Mutex<Option<String>> = Mutex::new(None);
 
@@ -41,16 +39,6 @@ pub fn init_from_args() {
             args,
             detected
         );
-    }
-}
-
-/// 単一起動プラグインから呼ぶ: 2重起動時に既存ウィンドウへファイルを渡す
-pub fn forward_open_file(app: &tauri::AppHandle, argv: &[String]) {
-    if let Some(path) = argv.iter().skip(1).find_map(|a| markdown_file_arg(a)) {
-        let _ = app.emit("open-file", path);
-    }
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_focus();
     }
 }
 

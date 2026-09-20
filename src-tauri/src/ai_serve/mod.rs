@@ -27,6 +27,7 @@ struct Daemon {
     child: std::process::Child,
     password: String,
     port: u16,
+    url: String,
 }
 
 static DAEMON: OnceLock<Mutex<Option<Daemon>>> = OnceLock::new();
@@ -55,8 +56,12 @@ pub struct AiServeStatus {
 
 fn status_snapshot() -> AiServeStatus {
     let s = settings::load();
-    let running = daemon_guard().lock().map(|d| d.is_some()).unwrap_or(false);
-    AiServeStatus { enabled: s.ai_call_enabled, running, url: s.ai_backend_url.clone() }
+    let guard = daemon_guard().lock();
+    let (running, url) = match guard.map(|g| g.as_ref().map(|d| d.url.clone())) {
+        Ok(Some(url)) => (true, url),
+        _ => (false, s.ai_backend_url.clone()),
+    };
+    AiServeStatus { enabled: s.ai_call_enabled, running, url }
 }
 
 /// localhost のみ許可する (http://127.0.0.1:port / http://localhost:port)
@@ -84,10 +89,14 @@ fn ensure_running() -> Result<(String, u16, String), String> {
     if !s.ai_call_enabled {
         return Err("AI呼び出しが無効です。設定で有効にしてください".to_string());
     }
-    let (host, port) = parse_local_url(&s.ai_backend_url)?;
+    let (host, preferred) = parse_local_url(&s.ai_backend_url)?;
+    // 複数起動時は空きポートにずらす (他インスタンスの現役デーモンは殺さない)
+    daemon::remove_legacy_pid_file();
+    let port = daemon::acquire_port(preferred)?;
     let password = settings::generate_token();
     let child = daemon::spawn_daemon(&s.opencode_bin, port, &password)?;
-    *daemon_guard().lock().map_err(|e| e.to_string())? = Some(Daemon { child, password: password.clone(), port });
+    let url = format!("http://{}:{}", host, port);
+    *daemon_guard().lock().map_err(|e| e.to_string())? = Some(Daemon { child, password: password.clone(), port, url });
     Ok((host, port, password))
 }
 
@@ -96,9 +105,14 @@ fn stop_daemon() {
         if let Some(mut d) = guard.take() {
             let _ = d.child.kill();
             let _ = d.child.wait();
+            daemon::remove_pid_file(d.port);
         }
     }
-    daemon::remove_pid_file();
+}
+
+/// アプリ終了時の後始末 (孤児デーモンを残さない)。失敗しても無視する。
+pub(crate) fn shutdown() {
+    stop_daemon();
 }
 
 /// session作成 → message送信(応答待ち) → session削除。本体処理。
@@ -130,14 +144,16 @@ async fn ask_flow(
         });
         // モデルは {providerID, modelID} 形式 (文字列 "provider/model" を分割する)。
         // 空なら serve 側の既定を使う。
-        if model.trim().is_empty() {
-            // 既定モデルのまま
-        } else if let Some(m) = http::parse_model(model) {
-            msg["model"] = m;
-        } else {
-            return Err(
-                "モデルは provider/model 形式で指定してください (例: opencode-go/kimi-k3)".to_string(),
-            );
+        match http::parse_model(model) {
+            Some(m) => {
+                msg["model"] = m;
+            }
+            None if model.trim().is_empty() => {}
+            None => {
+                return Err(
+                    "モデルは provider/model 形式で指定してください (例: opencode-go/kimi-k3)".to_string(),
+                );
+            }
         }
         let response = http::http_json(
             host,
@@ -223,26 +239,6 @@ pub async fn ai_abort() -> Result<(), String> {
 
 #[tauri::command]
 pub fn ai_status() -> AiServeStatus {
-    status_snapshot()
-}
-
-/// アプリ起動時の自動開始 (有効時のみ。MCP の mcp_autostart と同型)
-#[tauri::command]
-pub async fn ai_autostart() -> AiServeStatus {
-    if settings::load().ai_call_enabled {
-        if ensure_running().is_ok() {
-            // ロックは await の前に外す (MutexGuard は Send でないため)
-            let pending = daemon_guard()
-                .lock()
-                .ok()
-                .and_then(|guard| guard.as_ref().map(|d| (d.port, d.password.clone())));
-            if let Some((port, password)) = pending {
-                let _ = daemon::wait_healthy("127.0.0.1", port, &password).await;
-            }
-        } else {
-            log::warn!("AIサーバを開始できません");
-        }
-    }
     status_snapshot()
 }
 
