@@ -1,0 +1,66 @@
+use std::path::Path;
+use std::sync::Mutex;
+
+/// .md 関連付けのダブルクリック起動用: 起動引数からファイルを受け取る
+static STARTUP_FILE: Mutex<Option<String>> = Mutex::new(None);
+
+/// 引数が存在する Markdown ファイルを指す場合のみ採用する
+pub fn markdown_file_arg(arg: &str) -> Option<String> {
+    let lower = arg.to_lowercase();
+    if (lower.ends_with(".md") || lower.ends_with(".markdown")) && Path::new(arg).exists() {
+        Some(arg.to_string())
+    } else {
+        None
+    }
+}
+
+/// 起動時に一度だけ呼ぶ。診断用に引数を一時フォルダへ記録する。
+/// 無引数起動では何も書かず、ログの無限増大を防ぐ (診断価値のあるファイル引数のみ記録)。
+pub fn init_from_args() {
+    let args: Vec<String> = std::env::args_os()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
+    let detected = args.iter().skip(1).find_map(|a| markdown_file_arg(a));
+    *STARTUP_FILE.lock().unwrap() = detected.clone();
+
+    if detected.is_none() {
+        return;
+    }
+    if let Ok(mut log) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(std::env::temp_dir().join("markink-startup.log"))
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            log,
+            "[{:?}] args={:?} detected={:?}",
+            std::time::SystemTime::now(),
+            args,
+            detected
+        );
+    }
+}
+
+#[tauri::command]
+pub fn take_startup_file() -> Option<String> {
+    STARTUP_FILE.lock().unwrap().take()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filters_markdown_args() {
+        let dir = std::env::temp_dir();
+        let md = dir.join("mdn-startup-test.md");
+        std::fs::write(&md, "test").unwrap();
+        let s = md.to_string_lossy().to_string();
+        assert_eq!(markdown_file_arg(&s), Some(s.clone()));
+        assert!(markdown_file_arg("C:\\no-such-dir\\x.md").is_none());
+        assert!(markdown_file_arg("--port").is_none());
+        assert!(markdown_file_arg(&md.with_extension("txt").to_string_lossy().to_string()).is_none());
+        let _ = std::fs::remove_file(&md);
+    }
+}

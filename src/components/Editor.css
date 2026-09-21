@@ -1,0 +1,252 @@
+.editor-container {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* 名前ラベルのオーバーレイ分の余白を上に確保。横はラベルでスクロールバーが出ないよう隠す */
+  overflow-x: hidden;
+  padding: 20px 16px 16px;
+  font-family: 'Segoe UI', Meiryo, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  outline: none;
+  position: relative;
+}
+
+/* 行番号ガター表示時は左に余白を確保する */
+.editor.with-line-numbers {
+  padding-left: 8px;
+}
+
+.editor.with-line-numbers .ProseMirror {
+  padding-left: 48px;
+}
+
+.line-numbers-gutter {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.line-number {
+  position: absolute;
+  left: 0;
+  width: 40px;
+  padding-right: 8px;
+  box-sizing: border-box;
+  text-align: right;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #bbb;
+}
+
+.editor .ProseMirror {
+  outline: none;
+  white-space: pre-wrap;
+}
+
+/* 画面外のブロックはレイアウト/描画をスキップする (長文での入力・スクロールを軽くする) */
+.editor .ProseMirror > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2.6em;
+}
+
+/* 相手カーソルの名前ラベルは段落の外側に描画されるため、スキップ対象から外す (ラベルが切れないように) */
+.editor .ProseMirror > *:has(.mdn-collab-cursor) {
+  content-visibility: visible;
+}
+
+/* 表は行数分の高さがあるため、オフスクリーン時の見積りを大きめにする */
+.editor .ProseMirror > table {
+  contain-intrinsic-size: auto 8em;
+}
+
+/* 表 (要件: 表の追加・修正) */
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid #ccc;
+  padding: 4px 8px;
+  vertical-align: top;
+  position: relative;
+  min-width: 3em;
+}
+
+.ProseMirror th {
+  background: #f5f5f5;
+  font-weight: bold;
+}
+
+/* 選択中のセル (prosemirror-tables) */
+.ProseMirror .selectedCell:after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  content: '';
+  background: rgba(90, 140, 220, 0.18);
+  pointer-events: none;
+}
+
+/* 空文書ガイド (requirements.md:32) */
+.mdn-placeholder {
+  color: #999;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* フォーカス時はガイドを隠す。空文書のカーソル位置に装飾ノードがあると
+   IMEの初回変換が乱れることがあるため (1文字目が直接確定される対策) */
+.ProseMirror-focused .mdn-placeholder {
+  display: none;
+}
+
+/* 共同編集の相手カーソル: ラベルはオーバーレイ(絶対配置)で本文に影響させない */
+.mdn-collab-cursor {
+  position: relative;
+  border-left: 2px solid #999;
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+}
+
+.mdn-collab-label {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  margin-bottom: 1px;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 4px;
+  border-radius: 3px 3px 3px 0;
+  white-space: nowrap;
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* AIカーソルの選択範囲 (薄い紫) */
+.mdn-ai-selection {
+  background: rgba(124, 58, 237, 0.15);
+}
+
+/* 共同編集での他者の修正箇所 (薄い色 → 10秒で透明に) */
+.mdn-remote-change {
+  border-radius: 2px;
+  animation: mdn-remote-fade 10s ease-out forwards;
+}
+
+@keyframes mdn-remote-fade {
+  to {
+    background-color: transparent;
+  }
+}
+
+/* ProseMirror 基本スタイル */
+.ProseMirror {
+  min-height: 100%;
+}
+
+.ProseMirror p {
+  margin: 0.4em 0;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3 {
+  margin-top: 0.8em;
+  margin-bottom: 0.4em;
+  font-weight: bold;
+}
+
+.ProseMirror h1,
+.ProseMirror h2 {
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 0.2em;
+}
+
+.ProseMirror h1 { font-size: 2em; }
+.ProseMirror h2 { font-size: 1.5em; }
+.ProseMirror h3 { font-size: 1.17em; }
+
+.ProseMirror ul,
+.ProseMirror ol {
+  margin: 0.5em 0;
+  padding-left: 2em;
+}
+
+.ProseMirror blockquote {
+  border-left: 3px solid #ddd;
+  margin: 0.5em 0;
+  padding-left: 1em;
+  color: #666;
+}
+
+.ProseMirror code {
+  background: #f4f4f4;
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: 'Consolas', monospace;
+}
+
+.ProseMirror pre {
+  background: #f4f4f4;
+  padding: 1em;
+  border-radius: 5px;
+  overflow-x: auto;
+}
+
+.ProseMirror pre code {
+  background: none;
+  padding: 0;
+}
+
+/* フォーカス時のスタイル */
+.ProseMirror-focused {
+  outline: none;
+}
+
+/* HTMLコメントは既定で非表示 (コメントだけの段落は余白ごと畳む) */
+.mdn-html-comment {
+  display: none;
+}
+
+.editor p:has(> .mdn-html-comment:only-child) {
+  margin: 0;
+  line-height: 0;
+}
+
+/* 「コメント表示」が有効なときはブロック要素として表示する */
+.editor.show-comments .mdn-html-comment {
+  display: block;
+  margin: 4px 0;
+  background: #fdf6dd;
+  border: 1px solid #e6d9a2;
+  border-radius: 3px;
+  color: #8a7628;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 2px 6px;
+  white-space: pre-wrap;
+}
+
+.editor.show-comments p:has(> .mdn-html-comment:only-child) {
+  margin: 0.5em 0;
+  line-height: 1.6;
+}

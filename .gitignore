@@ -1,0 +1,38 @@
+# dependencies
+node_modules
+dist
+dist-tauri
+
+# testing
+coverage
+tests
+
+# production
+build
+*.log
+
+# Tauri
+src-tauri/target
+src-tauri/gen
+src-tauri/src-tauri
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# temp files
+*.tmp
+*.temp
+
+#開発用メモなど
+design
+promotion
+plan.md
+requirements.md
+mcp-plan.md
+docs/mcp-setup.md
+
