@@ -3,7 +3,15 @@ import { EditorState, Plugin } from 'prosemirror-state';
 import { schema } from './schema';
 import { markdownSerializer } from './markdown';
 import { createBasePlugins } from './plugins';
-import { ySyncPlugin, yCursorPlugin, prosemirrorToYXmlFragment, yXmlFragmentToProsemirror } from 'y-prosemirror';
+import {
+  ySyncPlugin,
+  yCursorPlugin,
+  yUndoPlugin,
+  undoCommand as yUndo,
+  redoCommand as yRedo,
+  prosemirrorToYXmlFragment,
+  yXmlFragmentToProsemirror
+} from 'y-prosemirror';
 import { remoteHighlightPlugin } from '../collaboration/remoteHighlight';
 
 // y-prosemirror による Yjs ↔ ProseMirror 連携 (requirements.md:110)
@@ -41,7 +49,10 @@ export function createCollabPlugins(
 ): Plugin[] {
   const plugins: Plugin[] = [
     ySyncPlugin(session.fragment),
-    ...createBasePlugins({ historyMode: 'collab' }),
+    ...createBasePlugins({
+      historyMode: 'collab',
+      collabHistory: { plugin: yUndoPlugin, undo: yUndo, redo: yRedo }
+    }),
     // 他者の編集箇所のハイライト (3秒で消える)
     remoteHighlightPlugin()
   ];
@@ -89,4 +100,3 @@ export function fragmentToMarkdown(fragment: Y.XmlFragment): string {
   const pmDoc = yXmlFragmentToProsemirror(schema, fragment);
   return markdownSerializer.serialize(pmDoc);
 }
-

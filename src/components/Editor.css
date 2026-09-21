@@ -109,6 +109,12 @@
   user-select: none;
 }
 
+/* フォーカス時はガイドを隠す。空文書のカーソル位置に装飾ノードがあると
+   IMEの初回変換が乱れることがあるため (1文字目が直接確定される対策) */
+.ProseMirror-focused .mdn-placeholder {
+  display: none;
+}
+
 /* 共同編集の相手カーソル: ラベルはオーバーレイ(絶対配置)で本文に影響させない */
 .mdn-collab-cursor {
   position: relative;

@@ -8,7 +8,6 @@ import { dropCursor } from 'prosemirror-dropcursor';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { history, undo, redo } from 'prosemirror-history';
 import { tableEditing } from 'prosemirror-tables';
-import { yUndoPlugin, undoCommand as yUndo, redoCommand as yRedo } from 'y-prosemirror';
 import { schema } from './schema';
 import { placeholderPlugin } from './image';
 import { aiCursorPlugin, getAttachedAwareness } from '../mcp/presence';
@@ -40,18 +39,30 @@ export type HistoryMode = 'local' | 'collab';
 export interface BasePluginOptions {
   /** local: 端末内履歴 / collab: 全員で共有する Yjs 履歴 */
   historyMode: HistoryMode;
+  /**
+   * 共同編集時だけ必要な Yjs 履歴。y-prosemirror は共同編集開始時に動的に
+   * 読み込むため、通常起動のメインバンドルには含めない。
+   */
+  collabHistory?: {
+    plugin: () => Plugin;
+    undo: Command;
+    redo: Command;
+  };
 }
 
 /** 通常編集と共同編集で共通のプラグイン構成 (単一情報源) */
-export function createBasePlugins({ historyMode }: BasePluginOptions): Plugin[] {
+export function createBasePlugins({ historyMode, collabHistory }: BasePluginOptions): Plugin[] {
+  if (historyMode === 'collab' && !collabHistory) {
+    throw new Error('共同編集の履歴プラグインが読み込まれていません');
+  }
   const historyPlugins: Plugin[] =
     historyMode === 'collab'
-      ? [yUndoPlugin()]
+      ? [collabHistory!.plugin()]
       : [history()];
 
   const historyKeys: Record<string, Command> =
     historyMode === 'collab'
-      ? { 'Mod-z': yUndo, 'Mod-y': yRedo, 'Mod-Shift-z': yRedo }
+      ? { 'Mod-z': collabHistory!.undo, 'Mod-y': collabHistory!.redo, 'Mod-Shift-z': collabHistory!.redo }
       : { 'Mod-z': undo, 'Mod-y': redo, 'Mod-Shift-z': redo };
 
   // Markdown のインライン記法を入力時に変換 (`*x*`→斜体、`**x**`→太字、`` `x` ``→コード)。

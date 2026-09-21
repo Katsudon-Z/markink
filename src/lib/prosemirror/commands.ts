@@ -1,7 +1,7 @@
-import { type Command, TextSelection } from 'prosemirror-state';
+import { type Command, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { toggleMark, wrapIn, setBlockType } from 'prosemirror-commands';
-import { wrapInList } from 'prosemirror-schema-list';
+import { wrapInList, liftListItem } from 'prosemirror-schema-list';
 import { undo, redo } from 'prosemirror-history';
 import { addColumnAfter, addRowAfter, deleteColumn, deleteRow, deleteTable } from 'prosemirror-tables';
 import { schema } from './schema';
@@ -125,6 +125,124 @@ function insertHorizontalRule(state: Parameters<Command>[0], dispatch?: Paramete
   return true;
 }
 
+/**
+ * 書式変更の基本方針 (クリア→設定):
+ * まずリストから完全に持ち上げて素の段落に戻し、それから目的の書式を付ける。
+ * ProseMirror は不正な構造への変換を黙って拒否するため (例: list_item 先頭の
+ * 見出し化、見出しのリスト巻き)、クリアを先行させないと「何も起きない」になる。
+ */
+
+/** 選択開始位置がリスト項目内なら、その項目を抱えるリストの種類を返す */
+function enclosingListType(state: EditorState) {
+  const { bullet_list, ordered_list, list_item } = schema.nodes;
+  const $from = state.selection.$from;
+  for (let d = $from.depth; d > 0; d -= 1) {
+    if ($from.node(d).type === list_item) {
+      const parent = d > 1 ? $from.node(d - 1) : null;
+      if (parent && (parent.type === bullet_list || parent.type === ordered_list)) {
+        return parent.type;
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+/** リストから完全に持ち上げる (多階層も解消)。持ち上げたら true */
+function liftOutOfLists(
+  dispatch: ((tr: Transaction) => void) | undefined,
+  view: EditorView | undefined
+): boolean {
+  const { list_item } = schema.nodes;
+  if (!list_item || !dispatch || !view) return false;
+  let lifted = false;
+  for (let i = 0; i < 10; i += 1) {
+    const s: EditorState = view.state;
+    const $from = s.selection.$from;
+    let inside = false;
+    for (let d = $from.depth; d > 0; d -= 1) {
+      if ($from.node(d).type === list_item) {
+        inside = true;
+        break;
+      }
+    }
+    if (!inside) break;
+    if (!liftListItem(list_item)(s, dispatch, view)) break;
+    lifted = true;
+  }
+  return lifted;
+}
+
+/**
+ * 見出し化 (リスト内なら全階層から持ち上げてから変換)。
+ */
+function setHeadingLevel(level: number): Command {
+  return (state, dispatch, view) => {
+    if (dispatch && view) {
+      liftOutOfLists(dispatch, view);
+      return setBlockType(schema.nodes.heading, { level })(view.state, dispatch, view);
+    }
+    return setBlockType(schema.nodes.heading, { level })(state, dispatch, view);
+  };
+}
+
+/** 本文化: リストから出す (リスト外では段落に変換)。 */
+function toParagraph(): Command {
+  return (state, dispatch, view) => {
+    if (dispatch && view && liftOutOfLists(dispatch, view)) {
+      return true;
+    }
+    return setBlockType(schema.nodes.paragraph)(state, dispatch, view);
+  };
+}
+
+/**
+ * リスト化: 同種リスト内なら解除 (持ち上げて終わり)、
+ * それ以外はクリア (持ち上げ+段落化) してから巻く。
+ */
+function toggleList(kind: 'bullet' | 'ordered'): Command {
+  return (state, dispatch, view) => {
+    const target =
+      kind === 'bullet' ? schema.nodes.bullet_list : schema.nodes.ordered_list;
+    if (dispatch && view) {
+      const current = enclosingListType(state);
+      if (current && current === target) {
+        liftOutOfLists(dispatch, view);
+        return true;
+      }
+      liftOutOfLists(dispatch, view);
+      let s = view.state;
+      // 見出しは段落に戻してから巻く (list_item 先頭は paragraph 必須のため)
+      setBlockType(schema.nodes.paragraph)(s, dispatch, view);
+      s = view.state;
+      return wrapInList(target)(s, dispatch, view);
+    }
+    return wrapInList(target)(state, dispatch, view);
+  };
+}
+
+/** 引用化: リストから出してから巻く (見出しは保持する)。 */
+function wrapQuote(): Command {
+  return (state, dispatch, view) => {
+    if (dispatch && view) {
+      liftOutOfLists(dispatch, view);
+      return wrapIn(schema.nodes.blockquote)(view.state, dispatch, view);
+    }
+    return wrapIn(schema.nodes.blockquote)(state, dispatch, view);
+  };
+}
+
+/** コードブロック化: リストから出してから変換する。 */
+function toCodeBlock(): Command {
+  return (state, dispatch, view) => {
+    if (dispatch && view) {
+      liftOutOfLists(dispatch, view);
+      return setBlockType(schema.nodes.code_block)(view.state, dispatch, view);
+    }
+    return setBlockType(schema.nodes.code_block)(state, dispatch, view);
+  };
+}
+
 /** 表を挿入し、先頭セルにカーソルを移す */
 function insertTable(rows: number, columns: number): Command {
   return (state, dispatch) => {
@@ -182,19 +300,19 @@ function insertTable(rows: number, columns: number): Command {
 
 /** 書式定義の単一情報源。UI と実行ロジックの双方がここを参照する */
 export const FORMATS: FormatSpec[] = [
-  { id: 'h1', label: 'H1', title: '大見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 1 })) },
-  { id: 'h2', label: 'H2', title: '中見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 2 })) },
-  { id: 'h3', label: 'H3', title: '小見出しにします', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 3 })) },
-  { id: 'h4', label: 'H4', title: '見出し4にします', menu: 'other', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 4 })) },
-  { id: 'h5', label: 'H5', title: '見出し5にします', menu: 'other', run: (v) => runCommand(v, setBlockType(schema.nodes.heading, { level: 5 })) },
+  { id: 'h1', label: 'H1', title: '大見出しにします', run: (v) => runCommand(v, setHeadingLevel(1)) },
+  { id: 'h2', label: 'H2', title: '中見出しにします', run: (v) => runCommand(v, setHeadingLevel(2)) },
+  { id: 'h3', label: 'H3', title: '小見出しにします', run: (v) => runCommand(v, setHeadingLevel(3)) },
+  { id: 'h4', label: 'H4', title: '見出し4にします', menu: 'other', run: (v) => runCommand(v, setHeadingLevel(4)) },
+  { id: 'h5', label: 'H5', title: '見出し5にします', menu: 'other', run: (v) => runCommand(v, setHeadingLevel(5)) },
   { id: 'hr', label: '―', title: '水平線を挿入します', menu: 'other', run: (v) => runCommand(v, insertHorizontalRule) },
-  { id: 'paragraph', label: '本文', title: '本文(段落)に戻します', run: (v) => runCommand(v, setBlockType(schema.nodes.paragraph)) },
+  { id: 'paragraph', label: '本文', title: '本文(段落)に戻します', run: (v) => runCommand(v, toParagraph()) },
   { id: 'bold', label: 'B', title: '太字にします', run: (v) => runCommand(v, toggleMark(schema.marks.strong)) },
   { id: 'italic', label: 'I', title: '斜体にします', run: (v) => runCommand(v, toggleMark(schema.marks.em)) },
-  { id: 'list', label: '•', title: '箇条書きにします', run: (v) => runCommand(v, wrapInList(schema.nodes.bullet_list)) },
-  { id: 'orderedList', label: '1.', title: '番号付きリストにします', run: (v) => runCommand(v, wrapInList(schema.nodes.ordered_list)) },
-  { id: 'quote', label: '❝', title: '引用にします', run: (v) => runCommand(v, wrapIn(schema.nodes.blockquote)) },
-  { id: 'code', label: '</>', title: 'コードブロックにします', run: (v) => runCommand(v, setBlockType(schema.nodes.code_block)) },
+  { id: 'list', label: '•', title: '箇条書きにします (もう一度で解除)', run: (v) => runCommand(v, toggleList('bullet')) },
+  { id: 'orderedList', label: '1.', title: '番号付きリストにします (もう一度で解除)', run: (v) => runCommand(v, toggleList('ordered')) },
+  { id: 'quote', label: '❝', title: '引用にします', run: (v) => runCommand(v, wrapQuote()) },
+  { id: 'code', label: '</>', title: 'コードブロックにします', run: (v) => runCommand(v, toCodeBlock()) },
   { id: 'table', label: '表', title: '3行×3列の表を挿入します', menu: 'table', run: (v) => runCommand(v, insertTable(TABLE_ROWS, TABLE_COLUMNS)) },
   { id: 'rowAdd', label: '行+', title: '現在の行の下に行を追加します', menu: 'table', run: (v) => runCommand(v, addRowAfter) },
   { id: 'rowDelete', label: '行-', title: '現在の行を削除します', menu: 'table', run: (v) => runCommand(v, deleteRow) },

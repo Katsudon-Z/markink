@@ -61,8 +61,15 @@ export function useDocumentActions({
       onBeforeOpen();
       loadMarkdown('', UNTITLED, null);
       afterDiscard();
+      // エディタにフォーカスを移す (作りたての空文書へ即入力しても
+      // IMEの初回変換が乱れないように。フォーカス外し時のキー取りこぼし対策)
+      try {
+        getView()?.focus();
+      } catch {
+        // ヘッドレス環境などでは無視
+      }
     },
-    [onBeforeOpen, loadMarkdown]
+    [onBeforeOpen, loadMarkdown, getView]
   );
 
   /** パス指定で開く (.md 関連付け・二重起動の受け渡しでも使用) */

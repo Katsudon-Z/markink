@@ -30,6 +30,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            // 開発版では画面キャプチャしやすいようにコンテンツ保護を解除する。
+            // リリースビルドではこのブロック自体をコンパイルしない。
+            #[cfg(debug_assertions)]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_content_protected(false)?;
+                }
+            }
+            Ok(())
+        })
         // 複数起動を許可する (単一起動プラグインは使わない)。
         // 文書フォルダごとに .markink マーカーで合流するため、別文書は干渉しない。
         .manage(CurrentDocument::default())
