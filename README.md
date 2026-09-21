@@ -13,3 +13,6 @@ https://github.com/user-attachments/assets/625756ea-2e0a-46f3-8e2e-60f006020408
 2. 「共同編集」→「セッション開始」でホストになる
 3. 参加者は同じファイルを開くとゲスト参加する（5人まで）
 
+### 意見・質問・機能提案
+
+意見・質問・機能提案はこちら: [Discussions](https://github.com/Katsudon-Z/markink/discussions)
