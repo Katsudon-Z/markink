@@ -6,3 +6,7 @@
 
 https://github.com/user-attachments/assets/625756ea-2e0a-46f3-8e2e-60f006020408
 
+## 稼働環境
+- WebView2(Win10 1803以降/Win11は標準搭載)
+- VC++2015以降ランタイム
+
