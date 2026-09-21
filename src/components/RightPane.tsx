@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
+import type { Node as PMNode } from 'prosemirror-model';
 import { getOutline, type OutlineHeading } from '../lib/mcp/document';
 import { subscribeDocVersion } from '../lib/mcp/docVersion';
 
@@ -19,14 +20,16 @@ export function RightPane({ getView, peers, aiName, collabActive }: RightPanePro
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
 
   useEffect(() => {
-    const recompute = () => {
-      const view = getView();
-      if (!view) {
+    // 版通知に付いてくる新しい文書を使う。通知時点では view.state が
+    // まだ古い文書のため、view から読むと1手遅れになる。
+    const recompute = (doc?: PMNode) => {
+      const target = doc ?? getView()?.state.doc;
+      if (!target) {
         setHeadings([]);
         return;
       }
       try {
-        const next = getOutline(view.state.doc);
+        const next = getOutline(target);
         setHeadings((prev) => {
           if (
             prev.length === next.length &&
@@ -41,7 +44,7 @@ export function RightPane({ getView, peers, aiName, collabActive }: RightPanePro
       }
     };
     recompute();
-    const unsub = subscribeDocVersion(() => recompute());
+    const unsub = subscribeDocVersion((_info, doc) => recompute(doc));
     return unsub;
   }, [getView, collabActive]);
 

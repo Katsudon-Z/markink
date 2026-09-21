@@ -53,6 +53,25 @@ describe('docVersion ストア', () => {
     bumpDocVersion('human');
     expect(seen).toEqual([1, 2]);
   });
+
+  it('dispatch時の通知には新しい文書が付く (目次の1手遅れ防止)', async () => {
+    const { TextSelection } = await import('prosemirror-state');
+    const { applyFormat } = await import('../../src/lib/prosemirror/editor');
+    const { getOutline } = await import('../../src/lib/mcp/document');
+    const view = createView('title');
+    const received: string[][] = [];
+    const unsub = subscribeDocVersion((_info, doc) => {
+      received.push(doc ? getOutline(doc).map((h) => h.text) : []);
+    });
+    const end = TextSelection.atEnd(view.state.doc).from;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, end)));
+    applyFormat(view, 'h1');
+    // 通知時点で既に見出し入りであること (view.state更新待ち不要)
+    expect(received.length).toBeGreaterThan(0);
+    expect(received[received.length - 1]).toContain('title');
+    unsub();
+    view.destroy();
+  });
 });
 
 describe('docVersionPlugin', () => {
