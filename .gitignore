@@ -28,11 +28,12 @@ Thumbs.db
 *.tmp
 *.temp
 
-#開発用メモなど
-design
-promotion
+# 非公開 (リポジトリに含めない。作業ツリーには残す)
+design/
+promotion/
 plan.md
 requirements.md
 mcp-plan.md
-docs/mcp-setup.md
+docs/
+media/
 
