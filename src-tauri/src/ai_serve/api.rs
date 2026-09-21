@@ -132,12 +132,12 @@ mod tests {
     fn api_url_validates_scheme() {
         assert!(validate_api_url("https://api.openai.com/v1/chat/completions").is_ok());
         assert!(validate_api_url("http://localhost:11434/v1/chat/completions").is_ok());
-        assert!(validate_api_url("http://192.168.1.38:1234/v1/chat/completions").is_ok());
+        assert!(validate_api_url("http://192.0.2.38:1234/v1/chat/completions").is_ok());
         assert!(validate_api_url("ftp://example.com").is_err());
         assert!(validate_api_url("not-a-url").is_err());
         // 空白・不正ポートは設定時に日本語エラーにする
-        assert!(validate_api_url("http://192.168.1.38:1234 /v1/chat/completions").is_err());
-        assert!(validate_api_url("http://192.168.1.38:abc/v1/chat/completions").is_err());
+        assert!(validate_api_url("http://192.0.2.38:1234 /v1/chat/completions").is_err());
+        assert!(validate_api_url("http://192.0.2.38:abc/v1/chat/completions").is_err());
         assert!(validate_api_url("").is_err());
     }
 

@@ -334,7 +334,7 @@ mod tests {
             ("localhost".to_string(), 5123)
         );
         assert!(parse_local_url("https://127.0.0.1:4096").is_err(), "https不可");
-        assert!(parse_local_url("http://192.168.1.2:4096").is_err(), "LAN不可");
+        assert!(parse_local_url("http://192.0.2.1:4096").is_err(), "LAN不可");
         assert!(parse_local_url("http://example.com:4096").is_err(), "外部不可");
         assert!(parse_local_url("http://127.0.0.1").is_err(), "ポート必須");
         assert!(parse_local_url("http://127.0.0.1:0").is_err(), "port 0不可");
