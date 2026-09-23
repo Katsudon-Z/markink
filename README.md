@@ -16,7 +16,7 @@ https://github.com/user-attachments/assets/ef963eb5-7d62-4470-9a4b-46ee25fafcf2
 
 ChatGPT等に接続して、続きを書く (確認なしで挿入)、要約、AIに質問、編集代行ができます。
 
-AIを利用するにはインターネット接続が必要です。
+AIのAPIが利用できるサービスとインターネット接続が必要です。
 
 ### 設定
 
