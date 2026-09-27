@@ -26,6 +26,8 @@ export interface McpSettings {
   fontSize: number;
   /** エディタのフォントファミリ (CSS値。空なら既定) */
   fontFamily: string;
+  /** ログ出力レベル: "off" | "error" | "warn" | "info" | "debug" */
+  logLevel: string;
   /** AI呼び出しの提供方式: "local" | "api" */
   aiProvider: string;
   /** serve に渡すモデル (local 時) */
@@ -97,6 +99,9 @@ export const ipc = {
   readFileBytes: (path: string) => invoke<number[]>('read_file_bytes', { path }),
   setEditorFont: (font: { sizePx?: number; family?: string }) =>
     invoke<void>('set_editor_font', { font }),
+  setLogLevel: (level: string) => invoke<void>('set_log_level', { level }),
+  logPath: () => invoke<string>('log_path'),
+  appendLog: (line: string) => invoke<void>('append_log', { line }),
   mcpAutostart: () => invoke<McpStatus>('mcp_autostart'),
   mcpSetEnabled: (enabled: boolean) => invoke<McpStatus>('mcp_set_enabled', { enabled }),
   mcpRegenerateToken: () => invoke<string>('mcp_regenerate_token'),

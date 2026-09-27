@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ipc, type McpSettings, type McpStatus } from '../lib/ipc';
+import { ipc, type McpSettings, type McpStatus } from '../../../../lib/ipc';
 
 /** AI共同編集 (MCPサーバ) の設定パネル。接続情報の表示・コピー・切断を行う */
 export function AiSettingsPanel({ onClose }: { onClose: () => void }) {

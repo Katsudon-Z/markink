@@ -59,6 +59,8 @@ pub struct Settings {
     pub font_family: String,
     /// 画像パスの記録方式: "relative" (assetsへコピー。既定) | "absolute" (元の場所を参照)
     pub image_path_mode: String,
+    /// ログ出力レベル: "off" | "error" | "warn" | "info" (既定) | "debug"
+    pub log_level: String,
 }
 
 impl Default for Settings {
@@ -83,6 +85,7 @@ impl Default for Settings {
             font_size: 14.0,
             font_family: String::new(),
             image_path_mode: "relative".to_string(),
+            log_level: "info".to_string(),
         }
     }
 }
@@ -235,6 +238,63 @@ pub fn set_editor_font(font: EditorFont) -> Result<(), String> {
     save(&s)
 }
 
+/// 有効なログレベル
+pub const LOG_LEVELS: &[&str] = &["off", "error", "warn", "info", "debug"];
+
+/// ログファイルのパス (設定と同じローカル領域)
+pub fn log_path_buf() -> PathBuf {
+    local_dir().join("markink.log")
+}
+
+/// ログ出力レベルを変更する
+#[tauri::command]
+pub fn set_log_level(level: String) -> Result<(), String> {
+    let level = level.trim().to_lowercase();
+    if !LOG_LEVELS.contains(&level.as_str()) {
+        return Err("ログレベルは off/error/warn/info/debug のいずれかで指定してください".to_string());
+    }
+    let mut s: Settings = load();
+    s.log_level = level;
+    save(&s)
+}
+
+/// ログファイルのパスを返す (設定画面の表示用)
+#[tauri::command]
+pub fn log_path() -> String {
+    log_path_buf().to_string_lossy().to_string()
+}
+
+/// ログファイルの上限バイト数。超過分は先頭から切り捨てる
+pub const LOG_FILE_LIMIT_BYTES: u64 = 200 * 1024;
+
+/// ログを1行追記する (フロントの logger から呼ぶ。失敗は文字列で返す)
+#[tauri::command]
+pub fn append_log(line: String) -> Result<(), String> {
+    use std::io::Write;
+    let dir = local_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("ログフォルダを作成できません: {}", e))?;
+    let path = log_path_buf();
+    // 上限超過時は末尾の半分だけ残して詰める
+    if fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > LOG_FILE_LIMIT_BYTES {
+        if let Ok(text) = fs::read_to_string(&path) {
+            let keep = text.len() / 2;
+            let cut = text
+                .char_indices()
+                .map(|(i, _)| i)
+                .filter(|&i| i >= text.len().saturating_sub(keep))
+                .next()
+                .unwrap_or(0);
+            let _ = fs::write(&path, &text[cut..]);
+        }
+    }
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("ログを書けません: {}", e))?;
+    writeln!(file, "{}", line).map_err(|e| format!("ログを書けません: {}", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,5 +355,17 @@ mod tests {
         assert!(parsed.ai_api_model.is_empty());
         assert!(parsed.user_name.is_empty());
         assert_eq!(parsed.image_path_mode, "relative");
+    }
+
+    #[test]
+    fn log_level_defaults_info_for_old_files() {
+        assert_eq!(Settings::default().log_level, "info");
+        let parsed: Settings = serde_json::from_str(r#"{"mcpEnabled":true}"#).unwrap();
+        assert_eq!(parsed.log_level, "info");
+        for level in LOG_LEVELS {
+            let s: Settings =
+                serde_json::from_str(&format!(r#"{{"logLevel":"{}"}}"#, level)).unwrap();
+            assert_eq!(s.log_level, *level);
+        }
     }
 }

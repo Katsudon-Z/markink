@@ -2,8 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { EditorView } from 'prosemirror-view';
 import { createEditorView } from '../lib/prosemirror/editor';
 import { handleImageDropPasteFactory } from '../lib/prosemirror/image';
-import type { AiModeId } from '../lib/ipc';
-import { FORMAT_SHORTCUTS } from '../lib/ai/shortcuts';
+import { matchShortcut } from '../lib/plugins/slots';
+import { registerCoreShortcuts } from '../lib/plugins/coreShortcuts';
 import { setLineNumbersVisible } from '../lib/prosemirror/lineNumbers';
 import './Editor.css';
 
@@ -21,11 +21,7 @@ interface EditorProps {
   fontSizePx?: number;
   /** エディタのフォントファミリ (CSS値)。空ならCSS既定 */
   fontFamily?: string;
-  /** Ctrl+Space でAI続きを直接挿入 (確認なし)。処理したら true */
-  onAiContinue?: () => boolean;
-  /** AIショートカット (要約/質問/編集代行) */
-  onAiShortcut?: (mode: AiModeId) => void;
-  /** 書式ショートカット (commands.ts のフォーマットID) */
+  /** 書式ショートカット (commands.ts のフォーマットID)。AI 系は AI プラグインが所有 */
   onFormatText?: (id: string) => void;
 }
 
@@ -37,26 +33,24 @@ export const Editor = React.memo(function Editor({
   showLineNumbers = true,
   fontSizePx,
   fontFamily,
-  onAiContinue,
-  onAiShortcut,
   onFormatText
 }: EditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   const onReadyRef = useRef(onReady);
   const getDocDirRef = useRef(getDocDir);
-  const onAiContinueRef = useRef(onAiContinue);
-  const onAiShortcutRef = useRef(onAiShortcut);
   const onFormatTextRef = useRef(onFormatText);
   onChangeRef.current = onChange;
   onReadyRef.current = onReady;
   getDocDirRef.current = getDocDir;
-  onAiContinueRef.current = onAiContinue;
-  onAiShortcutRef.current = onAiShortcut;
   onFormatTextRef.current = onFormatText;
 
   useEffect(() => {
     if (!editorRef.current) return;
+    // 中核ショートカット (書式) を共有レジストリに登録。解除は unmount 時。
+    const unregisterCore = registerCoreShortcuts({
+      onFormatText: (id) => onFormatTextRef.current?.(id)
+    });
     const view = createEditorView(
       editorRef.current,
       undefined,
@@ -74,42 +68,17 @@ export const Editor = React.memo(function Editor({
       void onFile(file, view, pos?.pos ?? null);
     };
     const handleDragOver = (e: DragEvent) => e.preventDefault();
-    // Ctrl+Space: AIで続きを書き、確認なしで挿入する (IME変換中は無視)
-    // Ctrl+Shift+S/Q/E: AI要約 / AI質問・編集代行メニューを開く
-    // 書式ショートカット: FORMAT_SHORTCUTS (Ctrl+B/I/K/E、Ctrl+Shift+数字/L/O/.)
+    // Ctrl/Cmd 系ショートカットは共有レジストリで引く (中核分は mount 時に登録)。
+    // 対応表は coreShortcuts.ts が単一情報源。従来の直書き分岐と同等。
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.repeat) return;
       if (view.composing) return;
-      if (e.code === 'Space' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        onAiContinueRef.current?.();
-        return;
-      }
       if (e.altKey) return;
-      if (e.shiftKey) {
-        const shortcut = onAiShortcutRef.current;
-        if (e.code === 'KeyS' || e.code === 'KeyQ' || e.code === 'KeyE') {
-          if (!shortcut) return;
-          e.preventDefault();
-          e.stopPropagation();
-          shortcut(e.code === 'KeyS' ? 'summary' : e.code === 'KeyQ' ? 'question' : 'edit');
-          return;
-        }
-        const fmt = FORMAT_SHORTCUTS.find((f) => f.code === e.code && f.shift);
-        if (fmt) {
-          e.preventDefault();
-          e.stopPropagation();
-          onFormatTextRef.current?.(fmt.format);
-        }
-        return;
-      }
-      const fmt = FORMAT_SHORTCUTS.find((f) => f.code === e.code && !f.shift);
-      if (fmt) {
-        e.preventDefault();
-        e.stopPropagation();
-        onFormatTextRef.current?.(fmt.format);
-      }
+      const run = matchShortcut(e.code, e.shiftKey);
+      if (!run) return;
+      e.preventDefault();
+      e.stopPropagation();
+      run();
     };
 
     // Ctrl+クリック: リンクを外部ブラウザで開く (通常クリックはカーソル配置)。
@@ -136,6 +105,7 @@ export const Editor = React.memo(function Editor({
 
     onReadyRef.current?.(view);
     return () => {
+      unregisterCore();
       view.dom.removeEventListener('drop', handleDrop);
       view.dom.removeEventListener('dragover', handleDragOver);
       view.dom.removeEventListener('keydown', handleKeyDown, true);

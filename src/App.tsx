@@ -14,15 +14,16 @@ import { useAutosave, serializeView } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
 import { useDocumentActions, useStartupFile, UNTITLED } from './hooks/useDocumentActions';
 import { useMcpBridge } from './hooks/useMcpBridge';
-import { useAiCall } from './hooks/useAiCall';
-import { AiSettingsPanel } from './components/AiSettingsPanel';
+import { useAiCall } from './plugins/builtin/ai/useAiCall';
+import { AiSettingsPanel } from './plugins/builtin/ai/components/AiSettingsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
-import { AiContextMenu } from './components/AiContextMenu';
-import { AiResultDialog } from './components/AiResultDialog';
+import { AiContextMenu } from './plugins/builtin/ai/components/AiContextMenu';
+import { AiResultDialog } from './plugins/builtin/ai/components/AiResultDialog';
 import { RightPane } from './components/RightPane';
 import { MenuDropdown } from './components/MenuDropdown';
-import { aiModeLabel } from './lib/ai/context';
+import { aiModeLabel } from './plugins/builtin/ai/lib/context';
 import { MCP_FEATURE_ENABLED } from './lib/features';
+import { enableFileLog, normalizeLogLevel, setLogLevel, writeLog } from './lib/log';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
@@ -98,6 +99,9 @@ function App() {
         if (cancelled) return;
         restoreEnabledRef.current = s.restoreEnabled;
         setRestoreEnabled(s.restoreEnabled);
+        setLogLevel(normalizeLogLevel(s.logLevel));
+        enableFileLog();
+        writeLog('info', 'app', '起動しました');
         userNameRef.current = s.userName ?? '';
         imagePathModeRef.current = s.imagePathMode === 'absolute' ? 'absolute' : 'relative';
         setShowLineNumbers(s.lineNumbers ?? true);
@@ -573,8 +577,6 @@ function App() {
           showLineNumbers={showLineNumbers}
           fontSizePx={fontSizePx}
           fontFamily={fontFamily}
-          onAiContinue={ai.continueDirectly}
-          onAiShortcut={ai.handleAiShortcut}
           onFormatText={handleFormat}
         />
         <RightPane

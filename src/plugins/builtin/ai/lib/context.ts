@@ -1,6 +1,6 @@
 import type { EditorView } from 'prosemirror-view';
-import { markdownSerializer } from '../prosemirror/editor';
-import type { AiModeId } from '../ipc';
+import { markdownSerializer } from '../../../../lib/prosemirror/editor';
+import type { AiModeId } from '../../../../lib/ipc';
 
 /** AI呼び出しに送る文書コンテキスト (右クリック位置の選択・カーソルから作る) */
 export interface AiContext {

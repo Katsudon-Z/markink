@@ -1,7 +1,7 @@
 import type { EditorView } from 'prosemirror-view';
-import { markdownParser } from '../prosemirror/editor';
-import { AI_TR_META } from '../mcp/docVersion';
-import { refreshAiCursor, setAiCursor } from '../mcp/presence';
+import { markdownParser } from '../../../../lib/prosemirror/editor';
+import { AI_TR_META } from '../../../../lib/mcp/docVersion';
+import { refreshAiCursor, setAiCursor } from '../../../../lib/mcp/presence';
 
 /** 位置を文書範囲に収める (送信後に人間が編集していた場合のずれ対策) */
 function clampPos(view: EditorView, pos: number): number {

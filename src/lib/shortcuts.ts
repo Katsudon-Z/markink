@@ -1,23 +1,7 @@
-import type { AiModeId } from '../ipc';
-
-// AI機能のショートカットキー定義 (単一情報源。Editor のキー処理と設定の一覧表示で共有)。
-// ProseMirror の baseKeymap やブラウザ既定と衝突しない Ctrl+Shift 系を使う。
-
-export interface AiShortcut {
-  mode: AiModeId;
-  /** 表示用 (例: "Ctrl + Shift + S") */
-  keys: string;
-  label: string;
-  /** プロンプト不要で即実行できるか (要約・続きのみ) */
-  direct: boolean;
-}
-
-export const AI_SHORTCUTS: AiShortcut[] = [
-  { mode: 'continue', keys: 'Ctrl + Space', label: 'AI続き (確認なしで挿入)', direct: true },
-  { mode: 'summary', keys: 'Ctrl + Shift + S', label: 'AI要約', direct: true },
-  { mode: 'question', keys: 'Ctrl + Shift + Q', label: 'AI質問 (メニューを開く)', direct: false },
-  { mode: 'edit', keys: 'Ctrl + Shift + E', label: 'AI編集代行 (メニューを開く)', direct: false }
-];
+/**
+ * 中核ショートカットの定義 (単一情報源。Editor のキー登録と設定の一覧表示で共有)。
+ * AI 系は含まない (AI プラグインが所有する)。
+ */
 
 /** エディタ組み込みのショートカット (設定の一覧表示用) */
 export interface EditorShortcut {
@@ -34,8 +18,8 @@ export const EDITOR_SHORTCUTS: EditorShortcut[] = [
 ];
 
 /**
- * 書式設定のショートカット (単一情報源。Editor のキー処理と設定の一覧表示で共有)。
- * ProseMirror の baseKeymap や AI ショートカットと衝突しない組み合わせを使う。
+ * 書式設定のショートカット (単一情報源)。
+ * ProseMirror の baseKeymap と衝突しない組み合わせを使う。
  */
 export interface FormatShortcutDef {
   /** KeyboardEvent.code */

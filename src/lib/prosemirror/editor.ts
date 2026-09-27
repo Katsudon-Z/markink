@@ -5,6 +5,7 @@ import { markdownParser, markdownSerializer } from './markdown';
 import { createBasePlugins } from './plugins';
 import { recordCursor } from '../mcp/docVersion';
 import { imageNodeView } from './image';
+import { codeBlockNodeView } from './codeBlocks';
 
 export { undo, redo } from 'prosemirror-history';
 export { schema, markdownParser, markdownSerializer };
@@ -31,8 +32,10 @@ export function createEditorView(
     // スペルチェックは日本語入力の速度と変換候補の挙動に影響するため無効化する
     attributes: { spellcheck: 'false' },
     // 画像は保存形式に関わらずローカル解決して描画する (相対/file/リモート対応)
+    // コードブロックは言語登録があればプラグイン描画 (無登録なら既定表示)
     nodeViews: {
-      image: imageNodeView(() => getDocDir?.() ?? null)
+      image: imageNodeView(() => getDocDir?.() ?? null),
+      code_block: codeBlockNodeView()
     },
     dispatchTransaction(tr) {
       const newState = view.state.apply(tr);

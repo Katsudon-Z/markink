@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { AiModeId } from '../lib/ipc';
+import type { AiModeId } from '../../../../lib/ipc';
 
 /**
  * エディタ右クリックのAIメニュー。

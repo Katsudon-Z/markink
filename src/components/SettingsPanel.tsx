@@ -1,7 +1,16 @@
 /** アプリ全般の設定パネル (復元・AI呼び出し・自分の名前) */
 import { useCallback, useEffect, useState } from 'react';
 import { ipc, type AiServeStatus } from '../lib/ipc';
-import { AI_SHORTCUTS, EDITOR_SHORTCUTS, FORMAT_SHORTCUTS } from '../lib/ai/shortcuts';
+import { AI_SHORTCUTS } from '../plugins/builtin/ai/lib/shortcuts';
+import { EDITOR_SHORTCUTS, FORMAT_SHORTCUTS } from '../lib/shortcuts';
+import {
+  getRecentEntries,
+  normalizeLogLevel,
+  setLogLevel,
+  subscribeLogs,
+  type LogEntry,
+  type LogLevel
+} from '../lib/log';
 
 export function SettingsPanel({
   restoreEnabled,
@@ -40,6 +49,10 @@ export function SettingsPanel({
   const [fontFamilyValue, setFontFamilyValue] = useState(fontFamily);
   const [appVersion, setAppVersion] = useState('');
   const [imagePathMode, setImagePathMode] = useState('relative');
+  const [logLevel, setLogLevelValue] = useState<LogLevel>('info');
+  const [logPathValue, setLogPathValue] = useState('');
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [logError, setLogError] = useState<string | null>(null);
 
   const FONT_PRESETS = [
     { value: '', label: '既定 (Segoe UI, メイリオ)' },
@@ -79,6 +92,44 @@ export function SettingsPanel({
       .then((v) => setAppVersion(v))
       .catch(() => setAppVersion(''));
   }, []);
+
+  // ログ区分：現在のレベル・ファイル場所・最新履歴を読む。開いている間だけ追従する
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([ipc.mcpGetSettings(), ipc.logPath().catch(() => '')])
+      .then(([s, path]) => {
+        if (cancelled) return;
+        setLogLevelValue(normalizeLogLevel(s.logLevel));
+        setLogPathValue(path);
+        setLogEntries(getRecentEntries(100));
+      })
+      .catch((e) => {
+        if (!cancelled) setLogError(e instanceof Error ? e.message : String(e));
+      });
+    const unsub = subscribeLogs(() => setLogEntries(getRecentEntries(100)));
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  const changeLogLevel = (level: LogLevel) => {
+    setLogLevelValue(level);
+    setLogLevel(level);
+    setLogError(null);
+    void ipc.setLogLevel(level).catch((e) => {
+      setLogError(e instanceof Error ? e.message : String(e));
+      // 永続化に失敗したら表示だけでも戻す
+      void ipc
+        .mcpGetSettings()
+        .then((s) => {
+          const current = normalizeLogLevel(s.logLevel);
+          setLogLevelValue(current);
+          setLogLevel(current);
+        })
+        .catch(() => {});
+    });
+  };
 
   const runAiAction = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -323,6 +374,34 @@ export function SettingsPanel({
             ? '文書内容は指定したAPIエンドポイントへ送信されます。'
             : '文書内容は localhost のAIサーバ経由で選択モデルに送信されます。'}
         </p>
+
+        <h3 className="ai-settings-heading">ログ</h3>
+        {logError && <p className="ai-settings-error">{logError}</p>}
+        <div className="ai-settings-row">
+          <span>出力レベル</span>
+          <select
+            value={logLevel}
+            onChange={(e) => changeLogLevel(e.target.value as LogLevel)}
+            aria-label="ログの出力レベル"
+          >
+            <option value="debug">デバッグ</option>
+            <option value="info">情報</option>
+            <option value="warn">警告</option>
+            <option value="error">エラー</option>
+            <option value="off">出力しない</option>
+          </select>
+        </div>
+        <p className="restore-message">ログファイル: {logPathValue || '確認中…'}</p>
+        {logEntries.length > 0 && (
+          <pre className="ai-settings-code ai-result-pre">
+            {logEntries
+              .map(
+                (e) =>
+                  `${new Date(e.time).toLocaleTimeString()} [${e.level}] [${e.source}] ${e.message}`
+              )
+              .join('\n')}
+          </pre>
+        )}
 
         <h3 className="ai-settings-heading">ショートカットキー</h3>
         <button className="btn" onClick={() => setShowShortcuts((v) => !v)}>

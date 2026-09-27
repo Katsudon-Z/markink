@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { EditorView } from 'prosemirror-view';
-import { ipc, type AiModeId } from '../lib/ipc';
-import { buildAiContext } from '../lib/ai/context';
-import { insertAiMarkdown, replaceAiRange } from '../lib/ai/applyResult';
+import { ipc, type AiModeId } from '../../../lib/ipc';
+import { buildAiContext } from './lib/context';
+import { insertAiMarkdown, replaceAiRange } from './lib/applyResult';
+import { aiBridge } from './bridge';
 
 /** 右クリックAIメニューの表示情報 (送信文字数は表示時に一度だけ計算する) */
 export interface AiMenuState {
@@ -323,6 +324,16 @@ export function useAiCall({ getView, notifyHuman, onOpenSettings }: UseAiCallOpt
       notifyHuman(err instanceof Error ? err.message : String(err));
     }
   }, [getView, aiRun, notifyHuman]);
+
+  // slot 実行経路 (AI プラグインの shortcut 登録) に実体を公開する
+  useEffect(() => {
+    aiBridge.continueDirectly = continueDirectly;
+    aiBridge.handleAiShortcut = handleAiShortcut;
+    return () => {
+      if (aiBridge.continueDirectly === continueDirectly) aiBridge.continueDirectly = null;
+      if (aiBridge.handleAiShortcut === handleAiShortcut) aiBridge.handleAiShortcut = null;
+    };
+  }, [continueDirectly, handleAiShortcut]);
 
   return {
     aiMenu,
