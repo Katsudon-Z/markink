@@ -61,6 +61,8 @@ pub struct Settings {
     pub image_path_mode: String,
     /// ログ出力レベル: "off" | "error" | "warn" | "info" (既定) | "debug"
     pub log_level: String,
+    /// 無効化したプラグインの id 一覧 (再起動後に反映)
+    pub disabled_plugins: Vec<String>,
 }
 
 impl Default for Settings {
@@ -86,6 +88,7 @@ impl Default for Settings {
             font_family: String::new(),
             image_path_mode: "relative".to_string(),
             log_level: "info".to_string(),
+            disabled_plugins: Vec::new(),
         }
     }
 }
@@ -295,6 +298,48 @@ pub fn append_log(line: String) -> Result<(), String> {
     writeln!(file, "{}", line).map_err(|e| format!("ログを書けません: {}", e))
 }
 
+/// プラグイン配置フォルダ (単一 .mink.js を置く場所)
+pub fn plugins_dir() -> PathBuf {
+    local_dir().join("plugins")
+}
+
+/// 配置フォルダにある .mink.js のフルパス一覧を返す。無ければ空
+#[tauri::command]
+pub fn list_plugins() -> Vec<String> {
+    let dir = plugins_dir();
+    let entries = fs::read_dir(dir).map(|rd| rd.filter_map(|e| e.ok()).collect::<Vec<_>>());
+    let mut out: Vec<String> = entries
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("js"))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.ends_with(".mink.js"))
+                .unwrap_or(false)
+        })
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+    out.sort();
+    out
+}
+
+/// プラグインの有効/無効を切り替える (再起動後に反映)
+#[tauri::command]
+pub fn set_plugin_enabled(id: String, enabled: bool) -> Result<(), String> {
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        return Err("プラグイン id が空です".to_string());
+    }
+    let mut s: Settings = load();
+    s.disabled_plugins.retain(|d| d != &id);
+    if !enabled {
+        s.disabled_plugins.push(id);
+    }
+    save(&s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,5 +412,12 @@ mod tests {
                 serde_json::from_str(&format!(r#"{{"logLevel":"{}"}}"#, level)).unwrap();
             assert_eq!(s.log_level, *level);
         }
+    }
+
+    #[test]
+    fn plugins_defaults_empty_for_old_files() {
+        assert!(Settings::default().disabled_plugins.is_empty());
+        let parsed: Settings = serde_json::from_str(r#"{"mcpEnabled":true}"#).unwrap();
+        assert!(parsed.disabled_plugins.is_empty());
     }
 }

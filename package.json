@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:plugins": "esbuild src/plugins/builtin/ai/index.ts --bundle --format=esm --platform=browser --outfile=dist/plugins/ai.mink.js && esbuild src/plugins/builtin/chart/index.ts --bundle --format=esm --platform=browser --outfile=dist/plugins/chart.mink.js",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

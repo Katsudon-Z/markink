@@ -83,6 +83,8 @@ pub fn run() {
             settings::set_log_level,
             settings::log_path,
             settings::append_log,
+            settings::list_plugins,
+            settings::set_plugin_enabled,
             mcp::mcp_autostart,
             mcp::mcp_set_enabled,
             mcp::mcp_regenerate_token,

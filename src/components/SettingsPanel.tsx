@@ -11,6 +11,7 @@ import {
   type LogEntry,
   type LogLevel
 } from '../lib/log';
+import { listLoadedPlugins } from '../lib/plugins/startup';
 
 export function SettingsPanel({
   restoreEnabled,
@@ -53,6 +54,9 @@ export function SettingsPanel({
   const [logPathValue, setLogPathValue] = useState('');
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [logError, setLogError] = useState<string | null>(null);
+  const [pluginList, setPluginList] = useState<{ id: string; name: string }[]>([]);
+  const [disabledPlugins, setDisabledPlugins] = useState<string[]>([]);
+  const [pluginError, setPluginError] = useState<string | null>(null);
 
   const FONT_PRESETS = [
     { value: '', label: '既定 (Segoe UI, メイリオ)' },
@@ -75,6 +79,7 @@ export function SettingsPanel({
       setAiApiModel(s.aiApiModel);
       setAiMaxChars(String(s.aiMaxChars));
       setImagePathMode(s.imagePathMode === 'absolute' ? 'absolute' : 'relative');
+      setDisabledPlugins(s.disabledPlugins ?? []);
       setAiStatus(st);
       setAiError(null);
     } catch (e) {
@@ -84,6 +89,7 @@ export function SettingsPanel({
 
   useEffect(() => {
     void refreshAi();
+    setPluginList(listLoadedPlugins());
   }, [refreshAi]);
 
   useEffect(() => {
@@ -402,6 +408,45 @@ export function SettingsPanel({
               .join('\n')}
           </pre>
         )}
+
+        <h3 className="ai-settings-heading">プラグイン</h3>
+        {pluginError && <p className="ai-settings-error">{pluginError}</p>}
+        {pluginList.length === 0 ? (
+          <p className="restore-message">読み込み中のプラグインはありません</p>
+        ) : (
+          pluginList.map((p) => {
+            const enabled = !disabledPlugins.includes(p.id);
+            return (
+              <div className="ai-settings-row" key={p.id}>
+                <span>
+                  {p.name} <small>({p.id})</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setPluginError(null);
+                    void ipc
+                      .setPluginEnabled(p.id, next)
+                      .then(() =>
+                        setDisabledPlugins((prev) =>
+                          next ? prev.filter((d) => d !== p.id) : [...prev, p.id]
+                        )
+                      )
+                      .catch((err) =>
+                        setPluginError(err instanceof Error ? err.message : String(err))
+                      );
+                  }}
+                  aria-label={`${p.name}を有効にする`}
+                />
+              </div>
+            );
+          })
+        )}
+        <p className="restore-message">
+          単一ファイル (.mink.js) を配置フォルダに置くと起動時に読み込みます。切替は再起動後に反映されます。
+        </p>
 
         <h3 className="ai-settings-heading">ショートカットキー</h3>
         <button className="btn" onClick={() => setShowShortcuts((v) => !v)}>

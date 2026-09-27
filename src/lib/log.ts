@@ -44,9 +44,13 @@ export function getLogLevel(): LogLevel {
   return currentLevel;
 }
 
-/** ファイル追記を開始する (App 起動時に1回。テストでは呼ばない)。 */
+/** ファイル追記を開始する (App 起動時に1回。テストでは呼ばない)。開始前の保持分も流す。 */
 export function enableFileLog(): void {
+  if (fileSinkEnabled) return;
   fileSinkEnabled = true;
+  for (const entry of entries) {
+    void ipc.appendLog(formatLine(entry)).catch(() => {});
+  }
 }
 
 export function getRecentEntries(limit = 100): LogEntry[] {

@@ -28,6 +28,8 @@ export interface McpSettings {
   fontFamily: string;
   /** ログ出力レベル: "off" | "error" | "warn" | "info" | "debug" */
   logLevel: string;
+  /** 無効化したプラグインの id 一覧 */
+  disabledPlugins: string[];
   /** AI呼び出しの提供方式: "local" | "api" */
   aiProvider: string;
   /** serve に渡すモデル (local 時) */
@@ -102,6 +104,9 @@ export const ipc = {
   setLogLevel: (level: string) => invoke<void>('set_log_level', { level }),
   logPath: () => invoke<string>('log_path'),
   appendLog: (line: string) => invoke<void>('append_log', { line }),
+  listPlugins: () => invoke<string[]>('list_plugins'),
+  setPluginEnabled: (id: string, enabled: boolean) =>
+    invoke<void>('set_plugin_enabled', { id, enabled }),
   mcpAutostart: () => invoke<McpStatus>('mcp_autostart'),
   mcpSetEnabled: (enabled: boolean) => invoke<McpStatus>('mcp_set_enabled', { enabled }),
   mcpRegenerateToken: () => invoke<string>('mcp_regenerate_token'),
