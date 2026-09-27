@@ -70,6 +70,8 @@ export function useAiCall({ getView, notifyHuman, onOpenSettings }: UseAiCallOpt
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement | null;
+      // プラグイン UI 内の右クリックでは AI メニューを開かない
+      if (target?.closest?.('[data-plugin-ui]')) return;
       if (!target?.closest?.('.ProseMirror')) return;
       e.preventDefault();
       void ipc

@@ -74,6 +74,9 @@ export const Editor = React.memo(function Editor({
       if (!(e.ctrlKey || e.metaKey) || e.repeat) return;
       if (view.composing) return;
       if (e.altKey) return;
+      // プラグイン UI (チャート編集欄など) のキー操作は本体で拾わない
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('[data-plugin-ui]')) return;
       const run = matchShortcut(e.code, e.shiftKey);
       if (!run) return;
       e.preventDefault();

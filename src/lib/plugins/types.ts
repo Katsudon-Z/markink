@@ -75,7 +75,12 @@ export interface SettingsSection {
 }
 
 /** コードブロック言語別の描画 (lang はフェンスの言語名。小文字照合)。 */
+export interface CodeBlockEditContext {
+  /** 内容を差し替える。成功したら true */
+  apply: (newCode: string) => boolean;
+}
+
 export interface CodeBlockRenderer {
   lang: string;
-  render: (code: string, lang: string) => HTMLElement;
+  render: (code: string, lang: string, edit?: CodeBlockEditContext) => HTMLElement;
 }
