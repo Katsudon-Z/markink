@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FORMATS } from '../lib/prosemirror/commands';
 import { MenuDropdown } from './MenuDropdown';
+import type { RegisteredCommand } from '../lib/plugins/commands';
 import './Toolbar.css';
 
 interface ToolbarProps {
@@ -8,13 +9,15 @@ interface ToolbarProps {
   /** HTMLコメントを表示するか (既定: 非表示) */
   showComments: boolean;
   onToggleComments: () => void;
+  extensionCommands?: RegisteredCommand[];
 }
 
 /** ツールバー内のドロップダウンメニュー (その他・表)。外側クリック・Escape で閉じる */
 export const Toolbar = React.memo(function Toolbar({
   onFormat,
   showComments,
-  onToggleComments
+  onToggleComments,
+  extensionCommands = []
 }: ToolbarProps) {
   const [linkInputShown, setLinkInputShown] = useState(false);
   const [href, setHref] = useState('');
@@ -88,6 +91,19 @@ export const Toolbar = React.memo(function Toolbar({
               {showComments ? '✓ コメント表示' : 'コメント表示'}
             </button>
           }
+        />
+      )}
+
+      {extensionCommands.length > 0 && (
+        <MenuDropdown
+          label="拡張"
+          title="プラグインのコマンド"
+          items={extensionCommands.map(({ key, command, run }) => ({
+            id: key,
+            label: command.title,
+            title: command.description,
+            onSelect: () => void Promise.resolve(run()).catch((error) => window.alert(String(error)))
+          }))}
         />
       )}
 

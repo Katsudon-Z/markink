@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { EditorView } from 'prosemirror-view';
 import { Editor } from './components/Editor';
 import { Toolbar } from './components/Toolbar';
@@ -23,12 +23,15 @@ import { RightPane } from './components/RightPane';
 import { MenuDropdown } from './components/MenuDropdown';
 import { aiModeLabel } from './lib/ai/context';
 import { MCP_FEATURE_ENABLED } from './lib/features';
+import { ExtensionHost } from './lib/plugins/extensionHost';
+import { PluginManagerPanel } from './components/PluginManagerPanel';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showAi, setShowAi] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPlugins, setShowPlugins] = useState(false);
   // 起動時の初期画面 (ロゴ + 新規作成/開く)。ファイルを開いたら閉じる
   const [showStartScreen, setShowStartScreen] = useState(true);
   // Markdownソース表示 (読み取り専用)
@@ -256,6 +259,25 @@ function App() {
     (message: string) => setAiNotice({ id: Date.now(), message }),
     []
   );
+  const extensionHost = useMemo(
+    () =>
+      new ExtensionHost({
+        getView,
+        getTitle: getMcpTitle,
+        confirmEdit: (proposal) =>
+          confirmMcpReplace(
+            proposal.reason ?? 'プラグインが文書全体を置き換えようとしています。続けますか？'
+          ),
+        notify: (_pluginId, message) => notifyMcpHuman(message),
+        log: (pluginId, event) => ipc.writePluginLog(pluginId, event.level, event.message)
+      }),
+    [getView, getMcpTitle, confirmMcpReplace, notifyMcpHuman]
+  );
+  const pluginCommands = useSyncExternalStore(
+    extensionHost.commands.subscribe,
+    extensionHost.commands.getSnapshot,
+    extensionHost.commands.getSnapshot
+  );
   const mcp = useMcpBridge({
     getView,
     getTitle: getMcpTitle,
@@ -424,7 +446,7 @@ function App() {
       {aiConfirm && (
         <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="ai-confirm-title">
           <div className="restore-dialog">
-            <h2 id="ai-confirm-title" className="restore-title">AIからの置換要求</h2>
+            <h2 id="ai-confirm-title" className="restore-title">文書編集の確認</h2>
             <p className="restore-message">{aiConfirm.summary}</p>
             <div className="restore-actions">
               <button className="btn btn-primary" onClick={() => aiConfirm.resolve(true)}>
@@ -491,6 +513,7 @@ function App() {
             <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
           )}
           <button className="btn" onClick={() => setShowSettings((v) => !v)}>設定</button>
+          <button className="btn" onClick={() => setShowPlugins((v) => !v)}>プラグイン</button>
         </div>
         <div className="app-status">
           {collab.active && (
@@ -515,6 +538,7 @@ function App() {
         onFormat={handleFormat}
         showComments={showComments}
         onToggleComments={handleToggleComments}
+        extensionCommands={pluginCommands}
       />
 
       {showCollab && (
@@ -563,6 +587,8 @@ function App() {
           onClose={() => setShowSettings(false)}
         />
       )}
+
+      {showPlugins && <PluginManagerPanel onClose={() => setShowPlugins(false)} />}
 
       <main className="app-main" onContextMenu={ai.handleContextMenu}>
         <Editor

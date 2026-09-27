@@ -22,6 +22,8 @@ export interface McpSettings {
   lineNumbers: boolean;
   /** 画像パスの記録方式: "relative" | "absolute" */
   imagePathMode: string;
+  fileLoggingEnabled: boolean;
+  fileLoggingLevel: 'error' | 'warn' | 'info' | 'debug';
   /** エディタの文字サイズ (px) */
   fontSize: number;
   /** エディタのフォントファミリ (CSS値。空なら既定) */
@@ -59,6 +61,19 @@ export interface RelayStats {
   subs: number;
 }
 
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  apiVersion: number;
+  description: string | null;
+  author: string | null;
+  permissions: string[];
+  entry: string | null;
+  installed: boolean;
+  executable: boolean;
+}
+
 /** 自動保存データ (本文 + 共同編集のルーム名 + 文書パス) */
 export interface AutosaveData {
   content: string;
@@ -94,7 +109,14 @@ export const ipc = {
   osUsername: () => invoke<string | null>('os_username'),
   setLineNumbers: (enabled: boolean) => invoke<void>('set_line_numbers', { enabled }),
   setImagePathMode: (mode: string) => invoke<void>('set_image_path_mode', { mode }),
+  setFileLogging: (enabled: boolean, level: McpSettings['fileLoggingLevel']) =>
+    invoke<void>('set_file_logging', { enabled, level }),
+  writePluginLog: (pluginId: string, level: McpSettings['fileLoggingLevel'], message: string) =>
+    invoke<void>('plugin_log', { pluginId, level, message }),
   readFileBytes: (path: string) => invoke<number[]>('read_file_bytes', { path }),
+  pluginInstallZip: (zipPath: string) => invoke<PluginInfo>('plugin_install_zip', { zipPath }),
+  pluginList: () => invoke<PluginInfo[]>('plugin_list'),
+  pluginUninstall: (id: string) => invoke<void>('plugin_uninstall', { id }),
   setEditorFont: (font: { sizePx?: number; family?: string }) =>
     invoke<void>('set_editor_font', { font }),
   mcpAutostart: () => invoke<McpStatus>('mcp_autostart'),

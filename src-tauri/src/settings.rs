@@ -59,6 +59,10 @@ pub struct Settings {
     pub font_family: String,
     /// 画像パスの記録方式: "relative" (assetsへコピー。既定) | "absolute" (元の場所を参照)
     pub image_path_mode: String,
+    /// アプリケーションログをファイルへ出力するか。既定は無効。
+    pub file_logging_enabled: bool,
+    /// ファイルログの最大レベル: error | warn | info | debug。
+    pub file_logging_level: String,
 }
 
 impl Default for Settings {
@@ -83,6 +87,8 @@ impl Default for Settings {
             font_size: 14.0,
             font_family: String::new(),
             image_path_mode: "relative".to_string(),
+            file_logging_enabled: false,
+            file_logging_level: "warn".to_string(),
         }
     }
 }
@@ -212,6 +218,27 @@ pub fn set_image_path_mode(mode: String) -> Result<(), String> {
     save(&s)
 }
 
+#[tauri::command]
+pub fn set_file_logging(enabled: bool, level: String) -> Result<(), String> {
+    if !matches!(level.as_str(), "error" | "warn" | "info" | "debug") {
+        return Err(
+            "ログレベルは error、warn、info、debug のいずれかを指定してください".to_string(),
+        );
+    }
+
+    let previous = load();
+    let mut next = previous.clone();
+    next.file_logging_enabled = enabled;
+    next.file_logging_level = level.clone();
+    save(&next)?;
+
+    if let Err(error) = crate::logging::configure(enabled, &level) {
+        let _ = save(&previous);
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorFont {
@@ -265,13 +292,13 @@ mod tests {
         let parsed: Settings = serde_json::from_str(r#"{"mcpEnabled":true}"#).unwrap();
         assert!(parsed.mcp_enabled);
         assert!(!parsed.restore_enabled);
-        let enabled: Settings =
-            serde_json::from_str(r#"{"restoreEnabled":true}"#).unwrap();
+        let enabled: Settings = serde_json::from_str(r#"{"restoreEnabled":true}"#).unwrap();
         assert!(enabled.restore_enabled);
     }
 
     #[test]
-    fn token_is_random_hex() {        let t1 = generate_token();
+    fn token_is_random_hex() {
+        let t1 = generate_token();
         let t2 = generate_token();
         assert_eq!(t1.len(), 32);
         assert!(t1.chars().all(|c| c.is_ascii_hexdigit()));

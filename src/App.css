@@ -237,6 +237,40 @@ html, body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
+.plugin-manager {
+  max-width: 680px;
+}
+
+.plugin-manager-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 12px 0;
+}
+
+.plugin-manager-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.plugin-manager-item p {
+  margin: 6px 0;
+}
+
+.plugin-manager-meta {
+  color: #666;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.plugin-manager-error {
+  color: #a00;
+  overflow-wrap: anywhere;
+}
+
 .restore-title {
   font-size: 16px;
   margin-bottom: 8px;

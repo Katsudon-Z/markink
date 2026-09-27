@@ -36,6 +36,7 @@ urlencoding = "2.1.3"
 ureq = { version = "2", features = ["json"] }
 # API URL の厳密な検証用 (ureq と同じパーサで設定時に検証する)
 url = "2"
+zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
 
 # 起動時間と配布サイズの改善 (軽量 LTO + 単一コード生成単位 + デバッグ情報削除)
 [profile.release]

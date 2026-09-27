@@ -40,6 +40,8 @@ export function SettingsPanel({
   const [fontFamilyValue, setFontFamilyValue] = useState(fontFamily);
   const [appVersion, setAppVersion] = useState('');
   const [imagePathMode, setImagePathMode] = useState('relative');
+  const [fileLoggingEnabled, setFileLoggingEnabled] = useState(false);
+  const [fileLoggingLevel, setFileLoggingLevel] = useState<'error' | 'warn' | 'info' | 'debug'>('warn');
 
   const FONT_PRESETS = [
     { value: '', label: '既定 (Segoe UI, メイリオ)' },
@@ -62,6 +64,8 @@ export function SettingsPanel({
       setAiApiModel(s.aiApiModel);
       setAiMaxChars(String(s.aiMaxChars));
       setImagePathMode(s.imagePathMode === 'absolute' ? 'absolute' : 'relative');
+      setFileLoggingEnabled(s.fileLoggingEnabled);
+      setFileLoggingLevel(s.fileLoggingLevel);
       setAiStatus(st);
       setAiError(null);
     } catch (e) {
@@ -199,6 +203,39 @@ export function SettingsPanel({
           「画像（リンク）」で挿入するときの記録方式 (既定: 相対)。
           「画像（コピー）」は常にassetsへコピーします。
         </p>
+
+        <h3 className="ai-settings-heading">ログ</h3>
+        <div className="ai-settings-row">
+          <span>ログをファイルに出力する</span>
+          <input
+            type="checkbox"
+            checked={fileLoggingEnabled}
+            onChange={(e) => {
+              const enabled = e.target.checked;
+              setFileLoggingEnabled(enabled);
+              void runAiAction(() => ipc.setFileLogging(enabled, fileLoggingLevel));
+            }}
+            aria-label="ログをファイルに出力する"
+          />
+        </div>
+        <div className="ai-settings-row">
+          <span>ログレベル</span>
+          <select
+            value={fileLoggingLevel}
+            onChange={(e) => {
+              const level = e.target.value as typeof fileLoggingLevel;
+              setFileLoggingLevel(level);
+              void runAiAction(() => ipc.setFileLogging(fileLoggingEnabled, level));
+            }}
+            aria-label="ログレベル"
+          >
+            <option value="error">Error</option>
+            <option value="warn">Warn</option>
+            <option value="info">Info</option>
+            <option value="debug">Debug</option>
+          </select>
+        </div>
+        <p className="restore-message">設定はすぐに反映されます。ログはアプリのローカルデータ領域に保存されます。</p>
 
         <h3 className="ai-settings-heading">エディタからのAI呼び出し (右クリックメニュー)</h3>        {aiError && <p className="ai-settings-error">{aiError}</p>}
         <div className="ai-settings-row">

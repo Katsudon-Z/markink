@@ -1,6 +1,11 @@
 import { Plugin } from 'prosemirror-state';
 import type { Transaction } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
+import {
+  advanceDocumentRevision,
+  getDocumentRevision,
+  resetDocumentRevision
+} from '../document/revision';
 
 // 文書版管理 (バージョン通知 P1)
 // すべての編集は view.dispatch に収束する (単独編集の人間入力・AI編集、
@@ -19,7 +24,6 @@ export interface DocVersionInfo {
   origin: DocChangeOrigin;
 }
 
-let version = 0;
 let lastOrigin: DocChangeOrigin = 'human';
 let lastCursor: { from: number; to: number } | null = null;
 // 購読者には新しい文書も渡す。appendTransaction 内で通知するため、
@@ -27,7 +31,7 @@ let lastCursor: { from: number; to: number } | null = null;
 const listeners = new Set<(info: DocVersionInfo, doc?: PMNode) => void>();
 
 export function getDocVersion(): number {
-  return version;
+  return getDocumentRevision();
 }
 
 export function getLastOrigin(): DocChangeOrigin {
@@ -36,7 +40,7 @@ export function getLastOrigin(): DocChangeOrigin {
 
 /** 版を1つ進める (dispatch監視プラグインと文書切替処理が呼ぶ) */
 export function bumpDocVersion(origin: DocChangeOrigin, doc?: PMNode): DocVersionInfo {
-  version += 1;
+  const version = advanceDocumentRevision();
   lastOrigin = origin;
   const info: DocVersionInfo = { version, origin };
   listeners.forEach((cb) => {
@@ -51,7 +55,7 @@ export function bumpDocVersion(origin: DocChangeOrigin, doc?: PMNode): DocVersio
 
 /** テスト用のリセット (本番では呼ばない) */
 export function resetDocVersion(): void {
-  version = 0;
+  resetDocumentRevision();
   lastOrigin = 'human';
   lastCursor = null;
 }

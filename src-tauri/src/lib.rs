@@ -5,7 +5,9 @@ mod collab_host;
 mod collab_relay;
 mod document;
 mod fsutil;
+mod logging;
 mod mcp;
+mod plugins;
 mod settings;
 mod startup;
 
@@ -31,6 +33,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let settings = settings::load();
+            let _ =
+                logging::initialize(settings.file_logging_enabled, &settings.file_logging_level);
             // 開発版では画面キャプチャしやすいようにコンテンツ保護を解除する。
             // リリースビルドではこのブロック自体をコンパイルしない。
             #[cfg(debug_assertions)]
@@ -80,6 +85,11 @@ pub fn run() {
             settings::set_line_numbers,
             settings::set_image_path_mode,
             settings::set_editor_font,
+            settings::set_file_logging,
+            plugins::plugin_install_zip,
+            plugins::plugin_list,
+            plugins::plugin_uninstall,
+            logging::plugin_log,
             mcp::mcp_autostart,
             mcp::mcp_set_enabled,
             mcp::mcp_regenerate_token,
