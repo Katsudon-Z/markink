@@ -88,6 +88,7 @@ pub fn run() {
             settings::set_file_logging,
             plugins::plugin_install_zip,
             plugins::plugin_list,
+            plugins::plugin_read_entry,
             plugins::plugin_uninstall,
             logging::plugin_log,
             mcp::mcp_autostart,

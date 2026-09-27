@@ -116,6 +116,7 @@ export const ipc = {
   readFileBytes: (path: string) => invoke<number[]>('read_file_bytes', { path }),
   pluginInstallZip: (zipPath: string) => invoke<PluginInfo>('plugin_install_zip', { zipPath }),
   pluginList: () => invoke<PluginInfo[]>('plugin_list'),
+  pluginReadEntry: (id: string) => invoke<string>('plugin_read_entry', { id }),
   pluginUninstall: (id: string) => invoke<void>('plugin_uninstall', { id }),
   setEditorFont: (font: { sizePx?: number; family?: string }) =>
     invoke<void>('set_editor_font', { font }),

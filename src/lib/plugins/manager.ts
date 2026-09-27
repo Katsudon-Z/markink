@@ -24,11 +24,21 @@ export interface PluginManagerOptions {
 export class PluginManager {
   private readonly plugins = new Map<PluginId, ManagedPlugin>();
   private readonly hostApis = new Map<PluginId, PluginHostApi>();
+  private readonly listeners = new Set<() => void>();
 
   constructor(private readonly options: PluginManagerOptions) {}
 
   list(): ManagedPlugin[] {
     return [...this.plugins.values()].map((plugin) => ({ ...plugin }));
+  }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  private publish(): void {
+    for (const listener of this.listeners) listener();
   }
 
   async enable(
@@ -53,6 +63,7 @@ export class PluginManager {
     }
 
     this.plugins.set(manifest.id, { manifest, state: 'starting' });
+    this.publish();
     let host: PluginHostApi | undefined;
     try {
       const approved = new Set(manifest.permissions.filter((permission) => grantedPermissions.has(permission)));
@@ -60,6 +71,7 @@ export class PluginManager {
       await this.options.runtime.start(manifest, host);
       this.hostApis.set(manifest.id, host);
       this.plugins.set(manifest.id, { manifest, state: 'active' });
+      this.publish();
     } catch (error) {
       await host?.dispose();
       this.hostApis.delete(manifest.id);
@@ -68,6 +80,7 @@ export class PluginManager {
         state: 'failed',
         error: error instanceof Error ? error.message : String(error)
       });
+      this.publish();
       throw error;
     }
   }
@@ -80,6 +93,7 @@ export class PluginManager {
       await this.hostApis.get(pluginId)?.dispose();
       this.hostApis.delete(pluginId);
       this.plugins.set(pluginId, { manifest: current.manifest, state: 'disabled' });
+      this.publish();
     } catch (error) {
       await this.hostApis.get(pluginId)?.dispose();
       this.hostApis.delete(pluginId);
@@ -88,7 +102,17 @@ export class PluginManager {
         state: 'failed',
         error: error instanceof Error ? error.message : String(error)
       });
+      this.publish();
       throw error;
     }
+  }
+
+  async fail(pluginId: PluginId, error: string): Promise<void> {
+    const current = this.plugins.get(pluginId);
+    if (!current || current.state === 'disabled') return;
+    await this.hostApis.get(pluginId)?.dispose();
+    this.hostApis.delete(pluginId);
+    this.plugins.set(pluginId, { manifest: current.manifest, state: 'failed', error });
+    this.publish();
   }
 }

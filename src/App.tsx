@@ -25,6 +25,8 @@ import { aiModeLabel } from './lib/ai/context';
 import { MCP_FEATURE_ENABLED } from './lib/features';
 import { ExtensionHost } from './lib/plugins/extensionHost';
 import { PluginManagerPanel } from './components/PluginManagerPanel';
+import { PluginManager } from './lib/plugins/manager';
+import { WorkerRuntime } from './lib/plugins/workerRuntime';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
@@ -278,6 +280,15 @@ function App() {
     extensionHost.commands.getSnapshot,
     extensionHost.commands.getSnapshot
   );
+  const pluginManagerRef = useRef<PluginManager | null>(null);
+  const pluginManager = useMemo(() => new PluginManager({
+    runtime: new WorkerRuntime((id, error) => {
+      void pluginManagerRef.current?.fail(id, error);
+      notifyMcpHuman(`プラグイン ${id} が停止しました: ${error}`);
+    }),
+    createHostApi: (manifest, permissions) => extensionHost.createApi(manifest, permissions)
+  }), [extensionHost, notifyMcpHuman]);
+  pluginManagerRef.current = pluginManager;
   const mcp = useMcpBridge({
     getView,
     getTitle: getMcpTitle,
@@ -588,7 +599,7 @@ function App() {
         />
       )}
 
-      {showPlugins && <PluginManagerPanel onClose={() => setShowPlugins(false)} />}
+      {showPlugins && <PluginManagerPanel manager={pluginManager} onClose={() => setShowPlugins(false)} />}
 
       <main className="app-main" onContextMenu={ai.handleContextMenu}>
         <Editor

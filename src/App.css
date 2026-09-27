@@ -266,6 +266,12 @@ html, body {
   margin-top: 4px;
 }
 
+.plugin-manager-buttons {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .plugin-manager-error {
   color: #a00;
   overflow-wrap: anywhere;

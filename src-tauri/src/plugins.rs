@@ -12,6 +12,7 @@ const MAX_ZIP_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
+const MAX_ENTRY_SOURCE_BYTES: u64 = 1024 * 1024;
 const MAX_ENTRIES: usize = 256;
 const MAX_COMPRESSION_RATIO: u64 = 200;
 static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
@@ -325,8 +326,16 @@ pub fn plugin_install_zip(zip_path: String) -> Result<PluginInfo, String> {
         )?;
         if let Some(entry) = &manifest.entry {
             let path = validate_archive_path(entry, false)?;
-            if !stage.join(path).is_file() {
+            let entry_path = stage.join(path);
+            if !entry_path.is_file() {
                 return Err("manifest の entry がZIP内にありません".into());
+            }
+            let entry_bytes =
+                fs::read(&entry_path).map_err(|e| format!("実行entryを読み取れません: {e}"))?;
+            if entry_bytes.len() as u64 > MAX_ENTRY_SOURCE_BYTES
+                || std::str::from_utf8(&entry_bytes).is_err()
+            {
+                return Err("実行entryは1 MiB以下のUTF-8 JavaScriptにしてください".into());
             }
         }
         let target = install_root.join(&manifest.id);
@@ -360,9 +369,9 @@ pub fn plugin_install_zip(zip_path: String) -> Result<PluginInfo, String> {
             description: manifest.description,
             author: manifest.author,
             permissions: manifest.permissions,
-            entry: manifest.entry,
+            entry: manifest.entry.clone(),
             installed: true,
-            executable: false,
+            executable: manifest.entry.is_some(),
         })
     })();
     if stage.exists() {
@@ -375,6 +384,9 @@ fn read_installed(path: &Path) -> Result<PluginInfo, String> {
     let bytes =
         fs::read(path.join("manifest.json")).map_err(|e| format!("manifestを読めません: {e}"))?;
     let manifest = validate_manifest(&bytes)?;
+    if path.file_name().and_then(|name| name.to_str()) != Some(manifest.id.as_str()) {
+        return Err("導入済みプラグインのIDと保存先が一致しません".into());
+    }
     Ok(PluginInfo {
         id: manifest.id,
         name: manifest.name,
@@ -383,10 +395,37 @@ fn read_installed(path: &Path) -> Result<PluginInfo, String> {
         description: manifest.description,
         author: manifest.author,
         permissions: manifest.permissions,
-        entry: manifest.entry,
+        entry: manifest.entry.clone(),
         installed: true,
-        executable: false,
+        executable: manifest.entry.is_some(),
     })
+}
+
+#[tauri::command]
+pub fn plugin_read_entry(id: String) -> Result<String, String> {
+    if !valid_id(&id) {
+        return Err("プラグインIDの形式が不正です".into());
+    }
+    let directory = plugins_root().join("installed").join(&id);
+    let metadata = fs::symlink_metadata(&directory)
+        .map_err(|e| format!("導入済みプラグインを確認できません: {e}"))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err("導入済みプラグインの保存先が不正です".into());
+    }
+    let info = read_installed(&directory)?;
+    let entry = info.entry.ok_or("実行entryがmanifestにありません")?;
+    let relative = validate_archive_path(&entry, false)?;
+    let canonical_root = fs::canonicalize(&directory).map_err(|e| e.to_string())?;
+    let canonical_entry = fs::canonicalize(directory.join(relative))
+        .map_err(|e| format!("実行entryを開けません: {e}"))?;
+    if !canonical_entry.starts_with(&canonical_root) {
+        return Err("実行entryがプラグイン保存先の外を指しています".into());
+    }
+    let metadata = fs::metadata(&canonical_entry).map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_ENTRY_SOURCE_BYTES {
+        return Err("実行entryが不正か、1 MiBを超えています".into());
+    }
+    fs::read_to_string(canonical_entry).map_err(|e| format!("実行entryを読めません: {e}"))
 }
 
 #[tauri::command]
