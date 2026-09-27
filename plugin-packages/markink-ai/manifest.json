@@ -1,0 +1,27 @@
+{
+  "id": "markink.ai-http",
+  "name": "markink AI HTTP",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "OpenAI互換 chat/completions APIで要約、続き生成、質問、編集代行を行います。",
+  "author": "markink",
+  "entry": "index.js",
+  "permissions": [
+    "document.read", "document.edit", "ui.register", "ui.notify", "ui.dialog",
+    "settings.read", "settings.write", "network.request", "secrets.use"
+  ],
+  "networkOrigins": [
+    "https://api.openai.com",
+    "http://localhost:11434",
+    "http://127.0.0.1:11434",
+    "http://localhost:4096",
+    "http://127.0.0.1:4096"
+  ],
+  "settingsFields": [
+    { "key": "apiUrl", "label": "chat/completions URL", "type": "text", "defaultValue": "https://api.openai.com/v1/chat/completions" },
+    { "key": "model", "label": "モデル名", "type": "text" },
+    { "key": "maxChars", "label": "送信する文書の上限文字数 (1000〜100000)", "type": "number", "defaultValue": "8000" },
+    { "key": "timeoutSecs", "label": "応答待ちタイムアウト秒 (5〜120)", "type": "number", "defaultValue": "120" },
+    { "key": "useApiKey", "label": "保存済みAPIキーを使用", "type": "choice", "options": ["yes", "no"], "defaultValue": "yes" }
+  ]
+}

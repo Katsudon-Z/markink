@@ -8,13 +8,21 @@ export type PluginPermission =
   | 'document.edit'
   | 'ui.register'
   | 'ui.notify'
-  | 'log.write';
+  | 'ui.dialog'
+  | 'log.write'
+  | 'settings.read'
+  | 'settings.write'
+  | 'network.request'
+  | 'secrets.use';
 
 export interface DocumentSnapshot {
   title: string;
   markdown: string;
   selection: { from: number; to: number } | null;
   revision: number;
+  size: number;
+  selectedText: string;
+  textBeforeCursor: string;
 }
 
 export interface EditProposal {
@@ -38,6 +46,8 @@ export interface PluginCommand {
   title: string;
   placement: 'menu';
   description?: string;
+  shortcut?: string;
+  contextMenu?: boolean;
 }
 
 export interface PluginManifest {
@@ -49,6 +59,21 @@ export interface PluginManifest {
   author?: string;
   entry?: string;
   permissions: PluginPermission[];
+  networkOrigins?: string[];
+  settingsFields?: PluginSettingField[];
+}
+
+export interface PluginSettingField {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'choice';
+  defaultValue?: string;
+  options?: string[];
+}
+
+export interface NetworkResponse {
+  status: number;
+  body: string;
 }
 
 export interface PluginLogEvent {
@@ -64,6 +89,13 @@ export interface PluginHostApi {
   registerCommand(command: PluginCommand, handler: () => void | Promise<void>): Promise<() => void>;
   notify(message: string): Promise<void>;
   log(event: PluginLogEvent): Promise<void>;
+  /** Non-secret, plugin-scoped string setting. */
+  getSetting(key: string): Promise<string | null>;
+  setSetting(key: string, value: string): Promise<void>;
+  /** Sends JSON to a manifest-approved origin. No redirects or custom headers. */
+  requestJson(url: string, body: string, useApiKey?: boolean, timeoutSecs?: number): Promise<NetworkResponse>;
+  prompt(label: string, initialValue?: string): Promise<string | null>;
+  showResult(title: string, text: string, canReplace: boolean): Promise<'insert' | 'replace' | 'cancel'>;
   /** Host lifecycle hook; unregisters all UI and event registrations owned by this plugin. */
   dispose(): Promise<void>;
 }

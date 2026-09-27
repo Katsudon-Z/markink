@@ -5,10 +5,15 @@ const PERMISSIONS = new Set<PluginPermission>([
   'document.edit',
   'ui.register',
   'ui.notify',
-  'log.write'
+  'ui.dialog',
+  'log.write',
+  'settings.read',
+  'settings.write',
+  'network.request',
+  'secrets.use'
 ]);
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{2,63}$/;
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -32,6 +37,69 @@ function safeEntry(value: unknown): string | undefined {
     throw new Error('manifest の entry はプラグイン内の相対パスで指定してください。');
   }
   return entry;
+}
+
+function parseOrigins(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 8) {
+    throw new Error('manifest の networkOrigins が不正です。');
+  }
+  const origins = value.map((item) => {
+    if (typeof item !== 'string' || item.length > 256) {
+      throw new Error('manifest の通信先が不正です。');
+    }
+    let url: URL;
+    try { url = new URL(item); } catch { throw new Error('manifest の通信先URLが不正です。'); }
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.origin !== item
+      || url.username || url.password || url.pathname !== '/' || url.search || url.hash
+      || (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) {
+      throw new Error('manifest の通信先は http(s) の origin を指定してください。');
+    }
+    return item;
+  });
+  if (new Set(origins).size !== origins.length) {
+    throw new Error('manifest の通信先に重複があります。');
+  }
+  return origins;
+}
+
+function parseSettingsFields(value: unknown): NonNullable<PluginManifest['settingsFields']> {
+  if (!Array.isArray(value) || value.length > 16) {
+    throw new Error('manifest の settingsFields が不正です。');
+  }
+  const fields = value.map((item) => {
+    if (!record(item) || typeof item.key !== 'string'
+      || !/^[a-zA-Z0-9._-]{1,64}$/.test(item.key) || item.key === '.' || item.key === '..'
+      || !['text', 'number', 'choice'].includes(String(item.type))) {
+      throw new Error('manifest の設定項目が不正です。');
+    }
+    const label = requiredString(item.label, 'settingsFields.label', 120);
+    const defaultValue = item.defaultValue === undefined ? undefined
+      : requiredString(item.defaultValue, 'settingsFields.defaultValue', 4096);
+    let options: string[] | undefined;
+    if (item.type === 'choice') {
+      if (!Array.isArray(item.options) || item.options.length < 2 || item.options.length > 8) {
+        throw new Error('選択式設定の候補が不正です。');
+      }
+      options = item.options.map((option) => requiredString(option, 'settingsFields.options', 120));
+      if (new Set(options).size !== options.length || (defaultValue && !options.includes(defaultValue))) {
+        throw new Error('選択式設定の既定値または候補が不正です。');
+      }
+    } else if (item.options !== undefined) {
+      throw new Error('選択式以外の設定に候補は指定できません。');
+    }
+    if (item.type === 'number' && defaultValue !== undefined && !Number.isFinite(Number(defaultValue))) {
+      throw new Error('数値設定の既定値が不正です。');
+    }
+    return {
+      key: item.key, label, type: item.type as 'text' | 'number' | 'choice',
+      ...(defaultValue === undefined ? {} : { defaultValue }),
+      ...(options === undefined ? {} : { options })
+    };
+  });
+  if (new Set(fields.map((field) => field.key)).size !== fields.length) {
+    throw new Error('設定キーが重複しています。');
+  }
+  return fields;
 }
 
 export function parsePluginManifest(source: string): PluginManifest {
@@ -73,11 +141,17 @@ export function parsePluginManifest(source: string): PluginManifest {
     version,
     apiVersion: EXTENSION_API_VERSION,
     permissions,
+    ...(value.networkOrigins === undefined ? {} : { networkOrigins: parseOrigins(value.networkOrigins) }),
+    ...(value.settingsFields === undefined ? {} : { settingsFields: parseSettingsFields(value.settingsFields) }),
     ...(value.description === undefined
       ? {}
       : { description: requiredString(value.description, 'description', 2000) }),
     ...(value.author === undefined ? {} : { author: requiredString(value.author, 'author', 120) }),
     ...(safeEntry(value.entry) ? { entry: safeEntry(value.entry) } : {})
   };
+  if (manifest.settingsFields?.length
+    && (!permissions.includes('settings.read') || !permissions.includes('settings.write'))) {
+    throw new Error('設定項目には settings.read と settings.write 権限が必要です。');
+  }
   return manifest;
 }

@@ -1,37 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { EditorView } from 'prosemirror-view';
+import { TextSelection } from 'prosemirror-state';
 import { Editor } from './components/Editor';
 import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
 import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
 import { insertImageAt } from './lib/prosemirror/image';
-import { bumpDocVersion } from './lib/mcp/docVersion';
-import { AI_CURSOR_COLOR } from './lib/mcp/presence';
+import { bumpDocumentVersion } from './lib/document/version';
 import { baseName, dirName, stem as stemOfPath, relativePath, toFileUri } from './lib/path';
 import { ipc } from './lib/ipc';
 import { useAutosave, serializeView } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
 import { useDocumentActions, useStartupFile, UNTITLED } from './hooks/useDocumentActions';
-import { useMcpBridge } from './hooks/useMcpBridge';
-import { useAiCall } from './hooks/useAiCall';
-import { AiSettingsPanel } from './components/AiSettingsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
-import { AiContextMenu } from './components/AiContextMenu';
-import { AiResultDialog } from './components/AiResultDialog';
 import { RightPane } from './components/RightPane';
 import { MenuDropdown } from './components/MenuDropdown';
-import { aiModeLabel } from './lib/ai/context';
-import { MCP_FEATURE_ENABLED } from './lib/features';
 import { ExtensionHost } from './lib/plugins/extensionHost';
 import { PluginManagerPanel } from './components/PluginManagerPanel';
 import { PluginManager } from './lib/plugins/manager';
 import { WorkerRuntime } from './lib/plugins/workerRuntime';
+import type { RegisteredCommand } from './lib/plugins/commands';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [showAi, setShowAi] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPlugins, setShowPlugins] = useState(false);
   // 起動時の初期画面 (ロゴ + 新規作成/開く)。ファイルを開いたら閉じる
@@ -98,7 +91,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     void ipc
-      .mcpGetSettings()
+      .getSettings()
       .then((s) => {
         if (cancelled) return;
         restoreEnabledRef.current = s.restoreEnabled;
@@ -211,69 +204,78 @@ function App() {
     void docRef.current?.openByPath(path);
   });
 
-  // AI共同編集 (MCP): Rust gateway からのツール実行要求を受ける
-  const getMcpTitle = useCallback(() => docRef.current?.title ?? UNTITLED, []);
-  const getMcpDirty = useCallback(() => autosave.isDirty(), [autosave]);
-  const getMcpAutoSave = useCallback(() => ipc.mcpGetAiAutoSave(), []);
-  const saveMcpDocument = useCallback(
-    () =>
-      new Promise<{ path: string }>((resolve, reject) => {
-        const docApi = docRef.current;
-        const currentPath = pathRef.current;
-        if (!docApi) {
-          reject(new Error('文書操作が準備できていません'));
-          return;
-        }
-        if (!currentPath) {
-          reject(
-            new Error('まだファイルに保存されていない文書です。人間が「保存」で保存してから実行してください')
-          );
-          return;
-        }
-        docApi.saveCurrent(() => resolve({ path: currentPath }));
-      }),
-    []
-  );
-  const [aiConfirm, setAiConfirm] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(
+  const getDocumentTitle = useCallback(() => docRef.current?.title ?? UNTITLED, []);
+  const [editConfirm, setEditConfirm] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(
     null
   );
-  const confirmMcpReplace = useCallback(
+  const confirmPluginReplace = useCallback(
     (summary: string) =>
       new Promise<boolean>((resolve) => {
-        setAiConfirm({
+        setEditConfirm({
           summary,
           resolve: (ok) => {
-            setAiConfirm(null);
+            setEditConfirm(null);
             resolve(ok);
           }
         });
       }),
     []
   );
-  // AIからの人間向け通知 (トースト表示・6秒で自動消去)
-  const [aiNotice, setAiNotice] = useState<{ id: number; message: string } | null>(null);
+  // プラグインからの通知 (トースト表示・6秒で自動消去)
+  const [notice, setNotice] = useState<{ id: number; message: string } | null>(null);
   useEffect(() => {
-    if (!aiNotice) return;
-    const timer = setTimeout(() => setAiNotice(null), 6000);
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
     return () => clearTimeout(timer);
-  }, [aiNotice]);
-  const notifyMcpHuman = useCallback(
-    (message: string) => setAiNotice({ id: Date.now(), message }),
+  }, [notice]);
+  const notifyHuman = useCallback(
+    (message: string) => setNotice({ id: Date.now(), message }),
     []
   );
+  const [pluginResult, setPluginResult] = useState<{
+    title: string; text: string; canReplace: boolean;
+    resolve: (choice: 'insert' | 'replace' | 'cancel') => void;
+  } | null>(null);
+  const pluginResultPending = useRef(false);
+  const pluginResultRef = useRef<{ pluginId: string; resolve: (choice: 'insert' | 'replace' | 'cancel') => void } | null>(null);
+  const showPluginResult = useCallback((pluginId: string, title: string, text: string, canReplace: boolean) => {
+    if (pluginResultPending.current) return Promise.reject(new Error('別の結果を表示中です'));
+    pluginResultPending.current = true;
+    return new Promise<'insert' | 'replace' | 'cancel'>((resolve) => {
+      const finish = (choice: 'insert' | 'replace' | 'cancel') => {
+        pluginResultRef.current = null;
+        pluginResultPending.current = false;
+        setPluginResult(null);
+        resolve(choice);
+      };
+      pluginResultRef.current = { pluginId, resolve: finish };
+      setPluginResult({ title, text, canReplace, resolve: finish });
+    });
+  }, []);
+  const cancelPluginDialogs = useCallback((pluginId: string) => {
+    if (pluginResultRef.current?.pluginId === pluginId) {
+      pluginResultRef.current.resolve('cancel');
+    }
+  }, []);
   const extensionHost = useMemo(
     () =>
       new ExtensionHost({
         getView,
-        getTitle: getMcpTitle,
+        getTitle: getDocumentTitle,
         confirmEdit: (proposal) =>
-          confirmMcpReplace(
+          confirmPluginReplace(
             proposal.reason ?? 'プラグインが文書全体を置き換えようとしています。続けますか？'
           ),
-        notify: (_pluginId, message) => notifyMcpHuman(message),
-        log: (pluginId, event) => ipc.writePluginLog(pluginId, event.level, event.message)
+        notify: (_pluginId, message) => notifyHuman(message),
+        log: (pluginId, event) => ipc.writePluginLog(pluginId, event.level, event.message),
+        getSetting: (pluginId, key) => ipc.pluginGetSetting(pluginId, key),
+        setSetting: (pluginId, key, value) => ipc.pluginSetSetting(pluginId, key, value),
+        requestJson: (pluginId, url, body, useApiKey, timeoutSecs) => ipc.pluginRequestJson(pluginId, url, body, useApiKey, timeoutSecs),
+        prompt: (_pluginId, label, initialValue) => Promise.resolve(window.prompt(label, initialValue)),
+        showResult: showPluginResult,
+        cancelDialogs: cancelPluginDialogs
       }),
-    [getView, getMcpTitle, confirmMcpReplace, notifyMcpHuman]
+    [getView, getDocumentTitle, confirmPluginReplace, notifyHuman, showPluginResult, cancelPluginDialogs]
   );
   const pluginCommands = useSyncExternalStore(
     extensionHost.commands.subscribe,
@@ -281,25 +283,56 @@ function App() {
     extensionHost.commands.getSnapshot
   );
   const pluginManagerRef = useRef<PluginManager | null>(null);
+  const [busyPluginId, setBusyPluginId] = useState<string | null>(null);
+  const runPluginCommand = useCallback(async (item: RegisteredCommand) => {
+    setBusyPluginId(item.pluginId);
+    try {
+      await item.run();
+    } finally {
+      setBusyPluginId((current) => current === item.pluginId ? null : current);
+    }
+  }, []);
+  const displayPluginCommands = useMemo(() => pluginCommands.map((item) => ({
+    ...item, run: () => runPluginCommand(item)
+  })), [pluginCommands, runPluginCommand]);
+  const [pluginMenu, setPluginMenu] = useState<{ x: number; y: number } | null>(null);
+  const pluginMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!pluginMenu) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!pluginMenuRef.current?.contains(event.target as Node)) setPluginMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPluginMenu(null);
+    };
+    document.addEventListener('mousedown', closeOutside, true);
+    document.addEventListener('keydown', closeOnEscape, true);
+    return () => {
+      document.removeEventListener('mousedown', closeOutside, true);
+      document.removeEventListener('keydown', closeOnEscape, true);
+    };
+  }, [pluginMenu]);
+  useEffect(() => {
+    const onPluginShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.repeat || event.isComposing) return;
+      const shortcut = `Mod-${event.shiftKey ? 'Shift-' : ''}${event.code}`;
+      const command = pluginCommands.find((item) => item.command.shortcut === shortcut);
+      if (!command) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void runPluginCommand(command).catch((error) => notifyHuman(String(error)));
+    };
+    document.addEventListener('keydown', onPluginShortcut, true);
+    return () => document.removeEventListener('keydown', onPluginShortcut, true);
+  }, [pluginCommands, notifyHuman, runPluginCommand]);
   const pluginManager = useMemo(() => new PluginManager({
     runtime: new WorkerRuntime((id, error) => {
       void pluginManagerRef.current?.fail(id, error);
-      notifyMcpHuman(`プラグイン ${id} が停止しました: ${error}`);
+      notifyHuman(`プラグイン ${id} が停止しました: ${error}`);
     }),
     createHostApi: (manifest, permissions) => extensionHost.createApi(manifest, permissions)
-  }), [extensionHost, notifyMcpHuman]);
+  }), [extensionHost, notifyHuman]);
   pluginManagerRef.current = pluginManager;
-  const mcp = useMcpBridge({
-    getView,
-    getTitle: getMcpTitle,
-    getPath: getDocPath,
-    isDirty: getMcpDirty,
-    saveDocument: saveMcpDocument,
-    confirmFullReplace: confirmMcpReplace,
-    aiAutoSaveEnabled: getMcpAutoSave,
-    notifyHuman: notifyMcpHuman
-  });
-
   const handleReady = useCallback(
     (view: EditorView) => {
       viewRef.current = view;
@@ -307,13 +340,6 @@ function App() {
     },
     [autosave]
   );
-
-  // ---- エディタ起点のAI呼び出し (右クリックメニュー → 結果ダイアログ) ----
-  const ai = useAiCall({
-    getView,
-    notifyHuman: notifyMcpHuman,
-    onOpenSettings: () => setShowSettings(true)
-  });
 
   const handleFormat = useCallback((format: string, payload?: { href?: string }) => {
     if (!viewRef.current) return;
@@ -379,11 +405,6 @@ function App() {
   }, []);
 
   const handleToggleComments = useCallback(() => setShowComments((v) => !v), []);
-
-  // 参加者一覧 (人間 + AI。パネルと右ペインで共有)
-  const peersWithAi = mcp.aiName
-    ? [...collab.peers, { clientID: -1, name: mcp.aiName, color: AI_CURSOR_COLOR, ai: true }]
-    : collab.peers;
 
   // ファイル名はウィンドウ枠 (タイトルバー) に表示する
   useEffect(() => {
@@ -454,16 +475,16 @@ function App() {
         </div>
       )}
 
-      {aiConfirm && (
+      {editConfirm && (
         <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="ai-confirm-title">
           <div className="restore-dialog">
             <h2 id="ai-confirm-title" className="restore-title">文書編集の確認</h2>
-            <p className="restore-message">{aiConfirm.summary}</p>
+            <p className="restore-message">{editConfirm.summary}</p>
             <div className="restore-actions">
-              <button className="btn btn-primary" onClick={() => aiConfirm.resolve(true)}>
+              <button className="btn btn-primary" onClick={() => editConfirm.resolve(true)}>
                 許可する
               </button>
-              <button className="btn" onClick={() => aiConfirm.resolve(false)}>
+              <button className="btn" onClick={() => editConfirm.resolve(false)}>
                 拒否する
               </button>
             </div>
@@ -510,7 +531,7 @@ function App() {
             onClick={() => {
               const md = serializeView(viewRef.current);
               if (md == null) {
-                notifyMcpHuman('エディタが準備できていません');
+                notifyHuman('エディタが準備できていません');
                 return;
               }
               setMdCopied(false);
@@ -520,26 +541,18 @@ function App() {
             Markdown表示
           </button>
           <button className="btn" onClick={() => setShowCollab((v) => !v)}>共同編集</button>
-          {MCP_FEATURE_ENABLED && (
-            <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
-          )}
           <button className="btn" onClick={() => setShowSettings((v) => !v)}>設定</button>
           <button className="btn" onClick={() => setShowPlugins((v) => !v)}>プラグイン</button>
         </div>
         <div className="app-status">
+          {busyPluginId && (
+            <button className="btn" title="実行中のプラグインを停止" onClick={() => {
+              void pluginManagerRef.current?.disable(busyPluginId).catch((error) => notifyHuman(String(error)));
+            }}>プラグイン処理中 · 停止</button>
+          )}
           {collab.active && (
             <span className="app-status-badge collab" title="共同編集中">
               共同編集中 ({collab.peers.length}人)
-            </span>
-          )}
-          {mcp.aiName && (
-            <span className="app-status-badge ai" title={`AIが編集中: ${mcp.aiName}`}>
-              {mcp.aiName}
-            </span>
-          )}
-          {(ai.aiBusy || ai.directBusy || mcp.toolBusy) && (
-            <span className="app-status-badge ai processing" title="AIが処理中です">
-              AI処理中…
             </span>
           )}
         </div>
@@ -549,7 +562,7 @@ function App() {
         onFormat={handleFormat}
         showComments={showComments}
         onToggleComments={handleToggleComments}
-        extensionCommands={pluginCommands}
+        extensionCommands={displayPluginCommands}
       />
 
       {showCollab && (
@@ -558,7 +571,7 @@ function App() {
           roomName={collab.roomName}
           suggestedRoom={suggestedRoom}
           positionLabel={collab.roleLabel ?? undefined}
-          peers={peersWithAi}
+          peers={collab.peers}
           diagnostics={collab.diagnostics}
           showCursors={collab.showCursors}
           onShowCursorsChange={collab.setShowCursors}
@@ -576,14 +589,12 @@ function App() {
               if (view && markdown != null) {
                 // 結合結果で文書を置換するため、版を明示的に進める
                 view.updateState(createEditorState(markdown));
-                bumpDocVersion('human');
+                bumpDocumentVersion(view.state.doc);
               }
             });
           }}
         />
       )}
-
-      {showAi && MCP_FEATURE_ENABLED && <AiSettingsPanel onClose={() => setShowAi(false)} />}
 
       {showSettings && (
         <SettingsPanel
@@ -599,9 +610,34 @@ function App() {
         />
       )}
 
+      {pluginResult && (
+        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="plugin-result-title">
+          <div className="restore-dialog ai-settings">
+            <h2 id="plugin-result-title" className="restore-title">{pluginResult.title}</h2>
+            <pre className="ai-settings-code ai-result-pre">{pluginResult.text}</pre>
+            <div className="restore-actions">
+              <button className="btn btn-primary" onClick={() => pluginResult.resolve('insert')}>挿入</button>
+              {pluginResult.canReplace && <button className="btn" onClick={() => pluginResult.resolve('replace')}>選択範囲を置換</button>}
+              <button className="btn" onClick={() => pluginResult.resolve('cancel')}>閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPlugins && <PluginManagerPanel manager={pluginManager} onClose={() => setShowPlugins(false)} />}
 
-      <main className="app-main" onContextMenu={ai.handleContextMenu}>
+      <main className="app-main" onContextMenu={(event) => {
+        if (!(event.target instanceof Element) || !event.target.closest('.ProseMirror')) return;
+        if (!pluginCommands.some((item) => item.command.contextMenu)) return;
+        event.preventDefault();
+        const view = viewRef.current;
+        const position = view?.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        if (view && position != null && view.state.selection.empty) {
+          const selection = TextSelection.near(view.state.doc.resolve(position));
+          view.dispatch(view.state.tr.setSelection(selection));
+        }
+        setPluginMenu({ x: event.clientX, y: event.clientY });
+      }}>
         <Editor
           onReady={handleReady}
           onChange={autosave.markDirty}
@@ -610,48 +646,25 @@ function App() {
           showLineNumbers={showLineNumbers}
           fontSizePx={fontSizePx}
           fontFamily={fontFamily}
-          onAiContinue={ai.continueDirectly}
-          onAiShortcut={ai.handleAiShortcut}
           onFormatText={handleFormat}
         />
         <RightPane
           getView={getView}
-          peers={peersWithAi}
-          aiName={mcp.aiName}
+          peers={collab.peers}
           collabActive={collab.active}
         />
       </main>
 
-      {ai.aiMenu && (
-        <AiContextMenu
-          x={ai.aiMenu.x}
-          y={ai.aiMenu.y}
-          enabled={ai.aiEnabled}
-          contextChars={ai.aiMenu.contextChars}
-          hasSelection={ai.aiMenu.hasSelection}
-          autoFocusPrompt={ai.aiMenu.focusPrompt}
-          onExecute={ai.executeAi}
-          onCopy={ai.copySelection}
-          onCut={ai.cutSelection}
-          onPaste={ai.pasteFromClipboard}
-          onClose={ai.closeAiMenu}
-          onOpenSettings={ai.openSettingsFromMenu}
-        />
-      )}
-
-      {(ai.aiBusy || ai.aiRun) && (
-        <AiResultDialog
-          title={aiModeLabel((ai.aiBusy ?? ai.aiRun)?.mode ?? 'question')}
-          busy={ai.aiBusy != null}
-          elapsedSecs={ai.aiElapsed}
-          text={ai.aiRun?.text ?? ''}
-          canReplace={ai.aiRun?.hasSelection === true || ai.aiRun?.mode === 'edit'}
-          error={ai.aiRun?.error ?? null}
-          onInsert={ai.applyAiInsert}
-          onReplace={ai.applyAiReplace}
-          onAbort={ai.abortAi}
-          onClose={ai.closeAiDialog}
-        />
+      {pluginMenu && (
+        <div ref={pluginMenuRef} className="ai-context-menu" style={{ position: 'fixed', left: Math.min(pluginMenu.x, window.innerWidth - 270), top: Math.min(pluginMenu.y, window.innerHeight - 260), zIndex: 1000 }}>
+          {pluginCommands.filter((item) => item.command.contextMenu).map((item) => (
+            <button key={item.key} className="ai-menu-item" onClick={() => {
+              setPluginMenu(null);
+              void runPluginCommand(item).catch((error) => notifyHuman(String(error)));
+            }}>{item.command.title}</button>
+          ))}
+          <button className="ai-menu-item" onClick={() => setPluginMenu(null)}>閉じる</button>
+        </div>
       )}
 
       <StatusBar
@@ -659,7 +672,6 @@ function App() {
         collabActive={collab.active}
         peersCount={collab.peers.length}
         diagnostics={collab.diagnostics}
-        aiName={mcp.aiName}
       />
 
       {showStartScreen && (
@@ -729,7 +741,7 @@ function App() {
                   void navigator.clipboard
                     ?.writeText(markdownSource)
                     .then(() => setMdCopied(true))
-                    .catch(() => notifyMcpHuman('コピーに失敗しました'));
+                    .catch(() => notifyHuman('コピーに失敗しました'));
                 }}
               >
                 {mdCopied ? 'コピーしました' : 'コピー'}
@@ -742,10 +754,10 @@ function App() {
         </div>
       )}
 
-      {aiNotice && (
-        <div className="ai-toast" role="status" key={aiNotice.id}>
-          <span className="ai-toast-name">AI</span>
-          <span>{aiNotice.message}</span>
+      {notice && (
+        <div className="ai-toast" role="status" key={notice.id}>
+          <span className="ai-toast-name">プラグイン</span>
+          <span>{notice.message}</span>
         </div>
       )}
     </div>

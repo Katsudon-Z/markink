@@ -89,8 +89,8 @@ export class PluginManager {
     const current = this.plugins.get(pluginId);
     if (!current || current.state === 'disabled') return;
     try {
-      await this.options.runtime.stop(pluginId);
       await this.hostApis.get(pluginId)?.dispose();
+      await this.options.runtime.stop(pluginId);
       this.hostApis.delete(pluginId);
       this.plugins.set(pluginId, { manifest: current.manifest, state: 'disabled' });
       this.publish();

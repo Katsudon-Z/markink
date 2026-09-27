@@ -1,0 +1,10 @@
+{
+  "id": "markink.hello-world",
+  "name": "HelloWorld 挿入",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "現在の選択位置に HelloWorld を書き込みます。",
+  "author": "markink test fixtures",
+  "entry": "index.js",
+  "permissions": ["document.read", "document.edit", "ui.register"]
+}

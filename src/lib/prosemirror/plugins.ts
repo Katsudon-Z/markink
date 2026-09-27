@@ -10,8 +10,7 @@ import { history, undo, redo } from 'prosemirror-history';
 import { tableEditing } from 'prosemirror-tables';
 import { schema } from './schema';
 import { placeholderPlugin } from './image';
-import { aiCursorPlugin, getAttachedAwareness } from '../mcp/presence';
-import { docVersionPlugin } from '../mcp/docVersion';
+import { documentVersionPlugin } from '../document/version';
 import { lineNumbersPlugin } from './lineNumbers';
 
 export const PLACEHOLDER_HINT =
@@ -94,10 +93,7 @@ export function createBasePlugins({ historyMode, collabHistory }: BasePluginOpti
     ...historyPlugins,
     // 表のセル移動 (Tab/Shift-Tab) などは keymap より先に評価する
     tableEditing(),
-    // AI共同編集のカーソル (接続中のみ描画。単独・共同の両モードで有効)
-    aiCursorPlugin(getAttachedAwareness),
-    // 文書版の監視 (変更検知用。AI編集と人間編集を区別する)
-    docVersionPlugin(),
+    documentVersionPlugin(),
     // 行番号ガター (設定で表示切替)
     lineNumbersPlugin(),
     keymap(historyKeys),

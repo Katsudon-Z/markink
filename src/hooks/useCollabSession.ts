@@ -4,7 +4,7 @@ import type { CollabSession, PeerInfo } from '../lib/collaboration/session';
 import { loadCollabModules, type CollabModules } from '../lib/collaboration/load';
 import { clearRemoteHighlights } from '../lib/collaboration/remoteHighlight';
 import { ipc, type RelayStats } from '../lib/ipc';
-import { attachAwareness, refreshAiCursor } from '../lib/mcp/presence';
+import { attachAwareness } from '../lib/collaboration/awareness';
 
 /** OSのログインユーザ名 (取得済みなら使い回す。設定名が空のときの表示名用) */
 let cachedOsName: string | null | undefined;
@@ -124,7 +124,6 @@ export function useCollabSession({
     const session = sessionRef.current;
     if (!session) return null;
     sessionRef.current = null;
-    // AIプレゼンスの Awareness 連携を外す (ローカル装飾は維持)
     attachAwareness(null);
     clearRemoteHighlights();
     void ipc.releaseSignal().catch(() => {});
@@ -167,14 +166,10 @@ export function useCollabSession({
         userName: getUserNameRef.current?.() || (await resolveOsName()) || undefined
       });
       sessionRef.current = session;
-      // AIプレゼンスを Awareness に接続 (人間の user フィールドは触らない)
       attachAwareness(session.awareness);
 
       const updatePeers = () => {
         setPeers(modules.session.listPeers(session.awareness, session.doc.clientID));
-        // リモート AI カーソルの再描画 (Awareness 変化時)
-        const view = getView();
-        if (view) refreshAiCursor(view);
       };
       updatePeers();
       session.awareness.on('change', updatePeers);

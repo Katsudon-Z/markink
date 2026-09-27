@@ -14,6 +14,7 @@ function toManifest(plugin: PluginInfo): PluginManifest {
   return parsePluginManifest(JSON.stringify({
     id: plugin.id, name: plugin.name, version: plugin.version,
     apiVersion: plugin.apiVersion, permissions: plugin.permissions,
+    networkOrigins: plugin.networkOrigins, settingsFields: plugin.settingsFields,
     ...(plugin.description ? { description: plugin.description } : {}),
     ...(plugin.author ? { author: plugin.author } : {}),
     ...(plugin.entry ? { entry: plugin.entry } : {})
@@ -23,12 +24,28 @@ function toManifest(plugin: PluginInfo): PluginManifest {
 export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps) {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [states, setStates] = useState<Record<string, PluginState>>({});
+  const [failures, setFailures] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [hasApiKey, setHasApiKey] = useState<Record<string, boolean>>({});
+  const [settingValues, setSettingValues] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
-    setPlugins(await ipc.pluginList());
+    const installed = await ipc.pluginList();
+    setPlugins(installed);
+    const keyStates = await Promise.all(installed.map(async (plugin) => [
+      plugin.id,
+      plugin.permissions.includes('secrets.use') ? await ipc.pluginHasApiKey(plugin.id) : false
+    ] as const));
+    setHasApiKey(Object.fromEntries(keyStates));
+    const values = await Promise.all(installed.flatMap((plugin) => plugin.settingsFields.map(async (field) => [
+      `${plugin.id}:${field.key}`,
+      await ipc.pluginGetSetting(plugin.id, field.key) ?? field.defaultValue ?? ''
+    ] as const)));
+    setSettingValues(Object.fromEntries(values));
     setStates(Object.fromEntries(manager.list().map((item) => [item.manifest.id, item.state])));
+    setFailures(Object.fromEntries(manager.list().filter((item) => item.error).map((item) => [item.manifest.id, item.error!] )));
   }, [manager]);
 
   useEffect(() => {
@@ -37,6 +54,7 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
 
   useEffect(() => manager.subscribe(() => {
     setStates(Object.fromEntries(manager.list().map((item) => [item.manifest.id, item.state])));
+    setFailures(Object.fromEntries(manager.list().filter((item) => item.error).map((item) => [item.manifest.id, item.error!] )));
   }), [manager]);
 
   const install = async () => {
@@ -48,11 +66,33 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
     if (typeof selected !== 'string') return;
     setBusy(true);
     try {
-      const incoming = await ipc.pluginInstallZip(selected);
-      await manager.disable(incoming.id);
+      const preview = await ipc.pluginPreviewZip(selected);
+      const previous = plugins.find((item) => item.id === preview.id);
+      if (previous && !window.confirm(
+        `「${previous.name} ${previous.version}」を「${preview.name} ${preview.version}」へ更新しますか？\n` +
+        `要求権限: ${preview.permissions.length ? preview.permissions.join(', ') : 'なし'}\n` +
+        `通信先: ${preview.networkOrigins.length ? preview.networkOrigins.join(', ') : 'なし'}\n` +
+        '実行中の場合は停止し、更新後は再度有効化が必要です。'
+      )) return;
+      const wasActive = manager.list().some((item) => item.manifest.id === preview.id && item.state === 'active');
+      if (wasActive) await manager.disable(preview.id);
+      try {
+        await ipc.pluginInstallZip(selected, preview);
+      } catch (installError) {
+        if (wasActive && previous) {
+          try {
+            const oldManifest = toManifest(previous);
+            await manager.enable(oldManifest, new Set(oldManifest.permissions as PluginPermission[]));
+          } catch (restoreError) {
+            throw new Error(`更新に失敗し、旧版の再起動にも失敗しました: ${String(installError)} / ${String(restoreError)}`);
+          }
+        }
+        throw installError;
+      }
       await refresh();
     } catch (cause) {
       setError(String(cause));
+      await refresh().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -84,6 +124,8 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
         if (!plugin.entry) throw new Error('実行entryがありません');
         if (!window.confirm(
           `「${plugin.name}」のコードを実行しますか？\n` +
+          `要求権限: ${plugin.permissions.length ? plugin.permissions.join(', ') : 'なし'}\n` +
+          `通信先: ${plugin.networkOrigins.length ? plugin.networkOrigins.join(', ') : 'なし'}\n` +
           'このZIPは信頼できる発行元から入手したものに限って有効化してください。' +
           'ZIPの発行元署名は検証されず、Workerは外部通信などを完全には制限できません。'
         )) return;
@@ -94,6 +136,52 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
     } catch (cause) {
       setError(String(cause));
       await refresh().catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveApiKey = async (plugin: PluginInfo) => {
+    setError(null);
+    setBusy(true);
+    try {
+      await ipc.pluginSetApiKey(plugin.id, apiKeys[plugin.id] ?? '');
+      setApiKeys((current) => ({ ...current, [plugin.id]: '' }));
+      await refresh();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteApiKey = async (plugin: PluginInfo) => {
+    setError(null);
+    setBusy(true);
+    try {
+      await ipc.pluginDeleteApiKey(plugin.id);
+      await refresh();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveSetting = async (plugin: PluginInfo, field: PluginInfo['settingsFields'][number]) => {
+    const value = (settingValues[`${plugin.id}:${field.key}`] ?? '').trim();
+    if (!value || value.length > 4096 || (field.type === 'number' && !Number.isFinite(Number(value)))
+      || (field.type === 'choice' && !field.options?.includes(value))) {
+      setError(`「${field.label}」の値が不正です。`);
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      await ipc.pluginSetSetting(plugin.id, field.key, value);
+      await refresh();
+    } catch (cause) {
+      setError(String(cause));
     } finally {
       setBusy(false);
     }
@@ -121,7 +209,45 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
                 {plugin.permissions.length > 0 && (
                   <div className="plugin-manager-meta">要求権限: {plugin.permissions.join(', ')}</div>
                 )}
+                {plugin.networkOrigins.length > 0 && (
+                  <div className="plugin-manager-meta">通信先: {plugin.networkOrigins.join(', ')}</div>
+                )}
+                {plugin.settingsFields.map((field) => {
+                  const key = `${plugin.id}:${field.key}`;
+                  return <div className="plugin-manager-meta" key={key}>
+                    <label htmlFor={`plugin-setting-${key}`}>{field.label}</label>
+                    {field.type === 'choice' ? <select
+                      id={`plugin-setting-${key}`}
+                      value={settingValues[key] ?? ''}
+                      onChange={(event) => setSettingValues((current) => ({ ...current, [key]: event.target.value }))}
+                    >
+                      {!settingValues[key] && <option value="">選択してください</option>}
+                      {field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select> : <input
+                      id={`plugin-setting-${key}`}
+                      type={field.type === 'number' ? 'number' : 'text'}
+                      value={settingValues[key] ?? ''}
+                      onChange={(event) => setSettingValues((current) => ({ ...current, [key]: event.target.value }))}
+                    />}
+                    <button className="btn" disabled={busy} onClick={() => void saveSetting(plugin, field)}>保存</button>
+                  </div>;
+                })}
+                {plugin.permissions.includes('secrets.use') && (
+                  <div className="plugin-manager-meta">
+                    <label htmlFor={`plugin-api-key-${plugin.id}`}>APIキー: {hasApiKey[plugin.id] ? '設定済み' : '未設定'}</label>
+                    <input
+                      id={`plugin-api-key-${plugin.id}`}
+                      type="password"
+                      autoComplete="off"
+                      value={apiKeys[plugin.id] ?? ''}
+                      onChange={(event) => setApiKeys((current) => ({ ...current, [plugin.id]: event.target.value }))}
+                    />
+                    <button className="btn" disabled={busy || !(apiKeys[plugin.id] ?? '')} onClick={() => void saveApiKey(plugin)}>保存</button>
+                    <button className="btn" disabled={busy || !hasApiKey[plugin.id]} onClick={() => void deleteApiKey(plugin)}>削除</button>
+                  </div>
+                )}
                 <div className="plugin-manager-meta">状態: {states[plugin.id] === 'active' ? '実行中' : states[plugin.id] === 'failed' ? '実行失敗' : '停止中'}</div>
+                {failures[plugin.id] && <div className="plugin-manager-error">{failures[plugin.id]}</div>}
               </div>
               <div className="plugin-manager-buttons">
                 <button className="btn" disabled={busy || !plugin.executable} onClick={() => void toggle(plugin)}>

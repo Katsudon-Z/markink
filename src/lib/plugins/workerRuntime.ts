@@ -2,7 +2,7 @@ import { ipc } from '../ipc';
 import type { PluginHostApi, PluginId, PluginManifest, PluginRuntime, PluginCommand, EditProposal, PluginLogEvent } from './api';
 
 const START_TIMEOUT_MS = 10_000;
-const CALL_TIMEOUT_MS = 120_000;
+const CALL_TIMEOUT_MS = 15 * 60_000;
 
 const WORKER_BOOTSTRAP = `
 const pending = new Map();
@@ -11,7 +11,8 @@ let nextRequest = 0;
 function call(method, args) {
   const requestId = ++nextRequest;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(requestId); reject(new Error('ホスト応答がタイムアウトしました')); }, 120000);
+    const timeout = method === 'prompt' || method === 'showResult' ? 15 * 60_000 : 135000;
+    const timer = setTimeout(() => { pending.delete(requestId); reject(new Error('ホスト応答がタイムアウトしました')); }, timeout);
     pending.set(requestId, { resolve, reject, timer });
     self.postMessage({ type: 'request', requestId, method, args });
   });
@@ -21,6 +22,11 @@ const api = Object.freeze({
   applyEdit: (proposal) => call('applyEdit', proposal),
   notify: (message) => call('notify', message),
   log: (event) => call('log', event),
+  getSetting: (key) => call('getSetting', key),
+  setSetting: (key, value) => call('setSetting', { key, value }),
+  requestJson: (url, body, useApiKey = false, timeoutSecs = 120) => call('requestJson', { url, body, useApiKey, timeoutSecs }),
+  prompt: (label, initialValue = '') => call('prompt', { label, initialValue }),
+  showResult: (title, text, canReplace = false) => call('showResult', { title, text, canReplace }),
   registerCommand: async (command, handler) => {
     if (typeof handler !== 'function') throw new Error('コマンドhandlerが不正です');
     if (handlers.has(command.id)) throw new Error('コマンドIDが重複しています');
@@ -146,20 +152,23 @@ export class WorkerRuntime implements PluginRuntime {
     const running = this.running.get(id);
     if (!running) return;
     running.stopping = true;
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 1000);
-      const oldHandler = running.worker.onmessage;
-      running.worker.onmessage = (event) => {
-        if (event.data?.type === 'stopped') {
-          clearTimeout(timer);
-          resolve();
-        } else {
-          oldHandler?.call(running.worker, event);
-        }
-      };
-      running.worker.postMessage({ type: 'stop' });
-    });
-    this.cleanup(id, running);
+    try {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 1000);
+        const oldHandler = running.worker.onmessage;
+        running.worker.onmessage = (event) => {
+          if (event.data?.type === 'stopped') {
+            clearTimeout(timer);
+            resolve();
+          } else {
+            oldHandler?.call(running.worker, event);
+          }
+        };
+        running.worker.postMessage({ type: 'stop' });
+      });
+    } finally {
+      this.cleanup(id, running);
+    }
   }
 
   private cleanup(id: PluginId, running: RunningWorker): void {
@@ -186,7 +195,7 @@ export class WorkerRuntime implements PluginRuntime {
       else invocation.reject(new Error(String(message.error || 'コマンドが失敗しました')));
       return;
     }
-    if (message.type !== 'request' || !Number.isSafeInteger(message.requestId)) return;
+    if (running.stopping || message.type !== 'request' || !Number.isSafeInteger(message.requestId)) return;
     const requestId = message.requestId as number;
     try {
       if (JSON.stringify(message).length > 1_200_000) throw new Error('要求が大きすぎます');
@@ -211,6 +220,46 @@ export class WorkerRuntime implements PluginRuntime {
           value = await running.host.log(message.args as PluginLogEvent);
           break;
         }
+        case 'getSetting': {
+          if (typeof message.args !== 'string') throw new Error('設定キーが不正です');
+          value = await running.host.getSetting(message.args);
+          break;
+        }
+        case 'setSetting': {
+          const args = message.args as { key?: unknown; value?: unknown } | null;
+          if (!args || typeof args.key !== 'string' || typeof args.value !== 'string') {
+            throw new Error('設定値が不正です');
+          }
+          value = await running.host.setSetting(args.key, args.value);
+          break;
+        }
+        case 'requestJson': {
+          const args = message.args as { url?: unknown; body?: unknown; useApiKey?: unknown; timeoutSecs?: unknown } | null;
+          if (!args || typeof args.url !== 'string' || typeof args.body !== 'string'
+            || (args.useApiKey !== undefined && typeof args.useApiKey !== 'boolean')
+            || (args.timeoutSecs !== undefined && typeof args.timeoutSecs !== 'number')) {
+            throw new Error('HTTP要求が不正です');
+          }
+          value = await running.host.requestJson(args.url, args.body, args.useApiKey === true, args.timeoutSecs ?? 120);
+          break;
+        }
+        case 'prompt': {
+          const args = message.args as { label?: unknown; initialValue?: unknown } | null;
+          if (!args || typeof args.label !== 'string' || typeof args.initialValue !== 'string') {
+            throw new Error('入力欄の要求が不正です');
+          }
+          value = await running.host.prompt(args.label, args.initialValue);
+          break;
+        }
+        case 'showResult': {
+          const args = message.args as { title?: unknown; text?: unknown; canReplace?: unknown } | null;
+          if (!args || typeof args.title !== 'string' || typeof args.text !== 'string'
+            || typeof args.canReplace !== 'boolean') {
+            throw new Error('結果表示の要求が不正です');
+          }
+          value = await running.host.showResult(args.title, args.text, args.canReplace);
+          break;
+        }
         case 'registerCommand': {
           const command = message.args as PluginCommand;
           if (!command || typeof command !== 'object' || typeof command.id !== 'string'
@@ -228,17 +277,18 @@ export class WorkerRuntime implements PluginRuntime {
         }
         default: throw new Error('未対応のホストAPIです');
       }
-      if (this.running.get(id) === running) {
+      if (this.running.get(id) === running && !running.stopping) {
         running.worker.postMessage({ type: 'response', requestId, ok: true, value });
       }
     } catch (error) {
-      if (this.running.get(id) === running) {
+      if (this.running.get(id) === running && !running.stopping) {
         running.worker.postMessage({ type: 'response', requestId, ok: false, error: errorText(error) });
       }
     }
   }
 
   private invoke(running: RunningWorker, commandId: string): Promise<void> {
+    if (running.stopping) return Promise.reject(new Error('プラグインは停止中です'));
     const invocationId = ++running.nextInvocation;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

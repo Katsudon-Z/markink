@@ -1,7 +1,7 @@
-/** アプリ全般の設定パネル (復元・AI呼び出し・自分の名前) */
+/** アプリ全般の設定パネル。 */
 import { useCallback, useEffect, useState } from 'react';
-import { ipc, type AiServeStatus } from '../lib/ipc';
-import { AI_SHORTCUTS, EDITOR_SHORTCUTS, FORMAT_SHORTCUTS } from '../lib/ai/shortcuts';
+import { ipc } from '../lib/ipc';
+import { EDITOR_SHORTCUTS, FORMAT_SHORTCUTS } from '../lib/prosemirror/shortcuts';
 
 export function SettingsPanel({
   restoreEnabled,
@@ -24,17 +24,8 @@ export function SettingsPanel({
   onEditorFontChange: (patch: { sizePx?: number; family?: string }) => void;
   onClose: () => void;
 }) {
-  const [aiEnabled, setAiEnabled] = useState(false);
-  const [aiStatus, setAiStatus] = useState<AiServeStatus | null>(null);
-  const [aiProvider, setAiProvider] = useState('local');
   const [userName, setUserName] = useState('');
-  const [aiModel, setAiModel] = useState('');
-  const [aiBackendUrl, setAiBackendUrl] = useState('');
-  const [aiApiUrl, setAiApiUrl] = useState('');
-  const [aiApiKey, setAiApiKey] = useState('');
-  const [aiApiModel, setAiApiModel] = useState('');
-  const [aiMaxChars, setAiMaxChars] = useState('8000');
-  const [aiError, setAiError] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [fontSize, setFontSize] = useState(String(fontSizePx));
   const [fontFamilyValue, setFontFamilyValue] = useState(fontFamily);
@@ -51,31 +42,20 @@ export function SettingsPanel({
     { value: "Consolas, 'Courier New', monospace", label: '等幅 (Consolas)' }
   ];
 
-  const refreshAi = useCallback(async () => {
+  const refreshSettings = useCallback(async () => {
     try {
-      const [s, st] = await Promise.all([ipc.mcpGetSettings(), ipc.aiStatus()]);
-      setAiEnabled(s.aiCallEnabled);
-      setAiProvider(s.aiProvider || 'local');
-      setUserName(s.userName);
-      setAiModel(s.aiModel);
-      setAiBackendUrl(s.aiBackendUrl);
-      setAiApiUrl(s.aiApiUrl);
-      setAiApiKey(s.aiApiKey);
-      setAiApiModel(s.aiApiModel);
-      setAiMaxChars(String(s.aiMaxChars));
-      setImagePathMode(s.imagePathMode === 'absolute' ? 'absolute' : 'relative');
-      setFileLoggingEnabled(s.fileLoggingEnabled);
-      setFileLoggingLevel(s.fileLoggingLevel);
-      setAiStatus(st);
-      setAiError(null);
-    } catch (e) {
-      setAiError(e instanceof Error ? e.message : String(e));
+      const settings = await ipc.getSettings();
+      setUserName(settings.userName);
+      setImagePathMode(settings.imagePathMode === 'absolute' ? 'absolute' : 'relative');
+      setFileLoggingEnabled(settings.fileLoggingEnabled);
+      setFileLoggingLevel(settings.fileLoggingLevel);
+      setSettingsError(null);
+    } catch (error) {
+      setSettingsError(String(error));
     }
   }, []);
 
-  useEffect(() => {
-    void refreshAi();
-  }, [refreshAi]);
+  useEffect(() => { void refreshSettings(); }, [refreshSettings]);
 
   useEffect(() => {
     void import('@tauri-apps/api/app')
@@ -84,28 +64,27 @@ export function SettingsPanel({
       .catch(() => setAppVersion(''));
   }, []);
 
-  const runAiAction = useCallback(
+  const runSettingsAction = useCallback(
     async (action: () => Promise<unknown>) => {
       try {
         await action();
-        await refreshAi();
+        await refreshSettings();
       } catch (e) {
-        setAiError(e instanceof Error ? e.message : String(e));
+        setSettingsError(e instanceof Error ? e.message : String(e));
       }
     },
-    [refreshAi]
+    [refreshSettings]
   );
 
   const saveName = () => {
-    void runAiAction(() => ipc.setUserName(userName)).then(() => onUserNameChange(userName.trim()));
+    void runSettingsAction(() => ipc.setUserName(userName)).then(() => onUserNameChange(userName.trim()));
   };
-
-  const isApi = aiProvider === 'api';
 
   return (
     <div className="restore-overlay" role="dialog" aria-modal="true" aria-label="設定">
       <div className="restore-dialog ai-settings">
         <h2 className="restore-title">設定</h2>
+        {settingsError && <p className="ai-settings-error" role="alert">{settingsError}</p>}
         <div className="ai-settings-row">
           <span>
             前回保存していない内容の復元 <small>(ON のときのみ自動保存し、異常終了時に復元を提案します)</small>
@@ -191,7 +170,7 @@ export function SettingsPanel({
             value={imagePathMode}
             onChange={(e) => {
               setImagePathMode(e.target.value);
-              void runAiAction(() => ipc.setImagePathMode(e.target.value));
+              void runSettingsAction(() => ipc.setImagePathMode(e.target.value));
             }}
             aria-label="画像リンクのパス記録方式"
           >
@@ -213,7 +192,7 @@ export function SettingsPanel({
             onChange={(e) => {
               const enabled = e.target.checked;
               setFileLoggingEnabled(enabled);
-              void runAiAction(() => ipc.setFileLogging(enabled, fileLoggingLevel));
+              void runSettingsAction(() => ipc.setFileLogging(enabled, fileLoggingLevel));
             }}
             aria-label="ログをファイルに出力する"
           />
@@ -225,7 +204,7 @@ export function SettingsPanel({
             onChange={(e) => {
               const level = e.target.value as typeof fileLoggingLevel;
               setFileLoggingLevel(level);
-              void runAiAction(() => ipc.setFileLogging(fileLoggingEnabled, level));
+              void runSettingsAction(() => ipc.setFileLogging(fileLoggingEnabled, level));
             }}
             aria-label="ログレベル"
           >
@@ -237,144 +216,12 @@ export function SettingsPanel({
         </div>
         <p className="restore-message">設定はすぐに反映されます。ログはアプリのローカルデータ領域に保存されます。</p>
 
-        <h3 className="ai-settings-heading">エディタからのAI呼び出し (右クリックメニュー)</h3>        {aiError && <p className="ai-settings-error">{aiError}</p>}
-        <div className="ai-settings-row">
-          <span>
-            有効化 <small>(ON のときのみAI呼び出しが使えます)</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={aiEnabled}
-            onChange={(e) => void runAiAction(() => ipc.aiSetEnabled(e.target.checked))}
-            aria-label="エディタからのAI呼び出しを有効にする"
-          />
-        </div>
-        <div className="ai-settings-row">
-          <span>提供方式</span>
-          <select
-            value={aiProvider}
-            onChange={(e) => {
-              setAiProvider(e.target.value);
-              void runAiAction(() => ipc.aiSetConfig({ provider: e.target.value }));
-            }}
-            aria-label="AIの提供方式"
-          >
-            <option value="local">ローカル (opencode serve)</option>
-            <option value="api">API (OpenAI互換)</option>
-          </select>
-        </div>
-        <div className="ai-settings-row">
-          <span>状態</span>
-          <strong>{aiStatus?.running ? `起動中 (${aiStatus.url})` : isApi ? 'API直呼出' : '停止中'}</strong>
-        </div>
-        {!isApi ? (
-          <>
-            <div className="ai-settings-row">
-              <span>モデル (空なら serve 側の既定)</span>
-              <input
-                type="text"
-                value={aiModel}
-                placeholder="例: opencode-go/kimi-k3"
-                onChange={(e) => setAiModel(e.target.value)}
-                onBlur={() => void runAiAction(() => ipc.aiSetConfig({ model: aiModel }))}
-                aria-label="AIモデル"
-                className="ai-menu-input"
-                style={{ position: 'static' }}
-              />
-            </div>
-            <div className="ai-settings-row">
-              <span>接続先 (localhost のみ)</span>
-              <input
-                type="text"
-                value={aiBackendUrl}
-                onChange={(e) => setAiBackendUrl(e.target.value)}
-                onBlur={() => void runAiAction(() => ipc.aiSetConfig({ backendUrl: aiBackendUrl }))}
-                aria-label="AI接続先URL"
-                className="ai-menu-input"
-                style={{ position: 'static' }}
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="ai-settings-row">
-              <span>API URL (chat/completions)</span>
-              <input
-                type="text"
-                value={aiApiUrl}
-                placeholder="https://api.openai.com/v1/chat/completions"
-                onChange={(e) => setAiApiUrl(e.target.value)}
-                onBlur={() => void runAiAction(() => ipc.aiSetConfig({ apiUrl: aiApiUrl }))}
-                aria-label="APIエンドポイントURL"
-                className="ai-menu-input"
-                style={{ position: 'static' }}
-              />
-            </div>
-            <div className="ai-settings-row">
-              <span>APIキー</span>
-              <input
-                type="password"
-                value={aiApiKey}
-                placeholder="sk-..."
-                onChange={(e) => setAiApiKey(e.target.value)}
-                onBlur={() => void runAiAction(() => ipc.aiSetConfig({ apiKey: aiApiKey }))}
-                aria-label="APIキー"
-                className="ai-menu-input"
-                style={{ position: 'static' }}
-              />
-            </div>
-            <div className="ai-settings-row">
-              <span>モデル名</span>
-              <input
-                type="text"
-                value={aiApiModel}
-                placeholder="例: gpt-4o-mini"
-                onChange={(e) => setAiApiModel(e.target.value)}
-                onBlur={() => void runAiAction(() => ipc.aiSetConfig({ apiModel: aiApiModel }))}
-                aria-label="APIモデル名"
-                className="ai-menu-input"
-                style={{ position: 'static' }}
-              />
-            </div>
-          </>
-        )}
-        <div className="ai-settings-row">
-          <span>送信上限文字数</span>
-          <input
-            type="number"
-            value={aiMaxChars}
-            min={1000}
-            max={100000}
-            onChange={(e) => setAiMaxChars(e.target.value)}
-            onBlur={() =>
-              void runAiAction(() =>
-                ipc.aiSetConfig({ maxChars: Number(aiMaxChars) || 8000 })
-              )
-            }
-            aria-label="送信上限文字数"
-          />
-        </div>
-        <p className="restore-message">
-          右クリックメニューの「AI要約・AI続き・AI質問・AI編集代行」から使います。
-          {isApi
-            ? '文書内容は指定したAPIエンドポイントへ送信されます。'
-            : '文書内容は localhost のAIサーバ経由で選択モデルに送信されます。'}
-        </p>
-
         <h3 className="ai-settings-heading">ショートカットキー</h3>
         <button className="btn" onClick={() => setShowShortcuts((v) => !v)}>
           {showShortcuts ? '一覧を閉じる' : '一覧を表示'}
         </button>
         {showShortcuts && (
           <div className="ai-shortcut-list">
-            <p className="restore-message">AI機能 (エディタにフォーカスがあるとき)</p>
-            <ul>
-              {AI_SHORTCUTS.map((s) => (
-                <li key={s.mode}>
-                  <code>{s.keys}</code> — {s.label}
-                </li>
-              ))}
-            </ul>
             <p className="restore-message">編集</p>
             <ul>
               {EDITOR_SHORTCUTS.map((s) => (
@@ -406,7 +253,7 @@ export function SettingsPanel({
               void import('@tauri-apps/plugin-opener')
                 .then(({ openUrl }) => openUrl('https://github.com/Katsudon-Z/markink'))
                 .catch((e) =>
-                  setAiError(e instanceof Error ? e.message : String(e))
+                  setSettingsError(e instanceof Error ? e.message : String(e))
                 );
             }}
           >

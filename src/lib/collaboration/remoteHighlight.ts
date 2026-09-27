@@ -3,7 +3,7 @@ import { Decoration, DecorationSet } from 'prosemirror-view';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { ySyncPluginKey } from 'y-prosemirror';
-import { getAttachedAwareness, type AwarenessLike } from '../mcp/presence';
+import { getAttachedAwareness, type AwarenessLike } from './awareness';
 
 // 共同編集時、他端末 (他者) が編集した箇所を薄くハイライトする。
 // 色はその参加者のカーソル色を使い、10秒で消える。

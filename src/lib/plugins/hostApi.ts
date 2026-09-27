@@ -6,6 +6,7 @@ import type {
   PluginPermission,
   PluginCommand
 } from './api';
+import type { NetworkResponse } from './api';
 import type { DocumentFacade } from './documentFacade';
 
 export interface PluginHostApiOptions {
@@ -19,6 +20,12 @@ export interface PluginHostApiOptions {
   ) => Promise<() => void>;
   notify: (message: string) => void | Promise<void>;
   log: (pluginId: PluginId, event: PluginLogEvent) => void | Promise<void>;
+  getSetting: (pluginId: PluginId, key: string) => Promise<string | null>;
+  setSetting: (pluginId: PluginId, key: string, value: string) => Promise<void>;
+  requestJson: (pluginId: PluginId, url: string, body: string, useApiKey: boolean, timeoutSecs: number) => Promise<NetworkResponse>;
+  prompt: (pluginId: PluginId, label: string, initialValue: string) => Promise<string | null>;
+  showResult: (pluginId: PluginId, title: string, text: string, canReplace: boolean) => Promise<'insert' | 'replace' | 'cancel'>;
+  cancelDialogs?: (pluginId: PluginId) => void;
 }
 
 /** Builds the capability-limited API passed to a plugin runtime. */
@@ -26,7 +33,12 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
   const messageLimit = 4096;
   const permissions = new Set(options.permissions);
   const registrations = new Set<() => void | Promise<void>>();
+  let disposed = false;
+  const requireActive = () => {
+    if (disposed) throw new Error(`プラグイン ${options.pluginId} は停止しました。`);
+  };
   const requirePermission = (permission: PluginPermission) => {
+    requireActive();
     if (!permissions.has(permission)) {
       throw new Error(`プラグイン ${options.pluginId} に ${permission} 権限がありません。`);
     }
@@ -39,7 +51,7 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
     },
     applyEdit: async (proposal: EditProposal) => {
       requirePermission('document.edit');
-      return options.document.applyEdit(proposal);
+      return options.document.applyEdit(proposal, () => !disposed);
     },
     registerCommand: async (command: PluginCommand, handler: () => void | Promise<void>) => {
       requirePermission('ui.register');
@@ -52,7 +64,14 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
       if (command.placement !== 'menu') {
         throw new Error('コマンドの表示場所が不正です。');
       }
+      if (command.shortcut && (command.shortcut.length > 80 || !/^Mod-(?:Shift-)?(?:Space|Key[A-Z])$/.test(command.shortcut))) {
+        throw new Error('ショートカットが不正です。');
+      }
       const unregister = await options.registerCommand(options.pluginId, command, handler);
+      if (disposed) {
+        await unregister();
+        throw new Error(`プラグイン ${options.pluginId} は停止しました。`);
+      }
       let active = true;
       const dispose = async () => {
         if (!active) return;
@@ -73,7 +92,42 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
       if (event.message.length > messageLimit) throw new Error('ログメッセージが長すぎます。');
       await options.log(options.pluginId, event);
     },
+    getSetting: async (key: string) => {
+      requirePermission('settings.read');
+      return options.getSetting(options.pluginId, key);
+    },
+    setSetting: async (key: string, value: string) => {
+      requirePermission('settings.write');
+      await options.setSetting(options.pluginId, key, value);
+    },
+    requestJson: async (url: string, body: string, useApiKey = false, timeoutSecs = 120) => {
+      requirePermission('network.request');
+      if (useApiKey) requirePermission('secrets.use');
+      if (url.length > 2048 || new TextEncoder().encode(body).byteLength > 512 * 1024) {
+        throw new Error('HTTP要求が大きすぎます。');
+      }
+      if (!Number.isInteger(timeoutSecs) || timeoutSecs < 5 || timeoutSecs > 120) {
+        throw new Error('HTTPタイムアウトは5〜120秒にしてください。');
+      }
+      return options.requestJson(options.pluginId, url, body, useApiKey, timeoutSecs);
+    },
+    prompt: async (label: string, initialValue = '') => {
+      requirePermission('ui.dialog');
+      if (!label.trim() || label.length > 200 || initialValue.length > 4096) {
+        throw new Error('入力欄の内容が不正です。');
+      }
+      return options.prompt(options.pluginId, label, initialValue);
+    },
+    showResult: async (title: string, content: string, canReplace: boolean) => {
+      requirePermission('ui.dialog');
+      if (!title.trim() || title.length > 120 || content.length > 256 * 1024) {
+        throw new Error('結果表示の内容が不正です。');
+      }
+      return options.showResult(options.pluginId, title, content, canReplace);
+    },
     dispose: async () => {
+      disposed = true;
+      options.cancelDialogs?.(options.pluginId);
       const cleanup = [...registrations];
       registrations.clear();
       await Promise.allSettled(cleanup.map((unregister) => unregister()));

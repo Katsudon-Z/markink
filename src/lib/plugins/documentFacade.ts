@@ -30,11 +30,15 @@ export class DocumentFacade {
         from: view.state.selection.from,
         to: view.state.selection.to
       },
-      revision: this.revision()
+      revision: this.revision(),
+      size: view.state.doc.content.size,
+      selectedText: view.state.doc.textBetween(view.state.selection.from, view.state.selection.to, '\n'),
+      textBeforeCursor: view.state.doc.textBetween(Math.max(0, view.state.selection.from - 100000), view.state.selection.from, '\n')
     };
   }
 
-  async applyEdit(proposal: EditProposal): Promise<EditResult> {
+  async applyEdit(proposal: EditProposal, canApply: () => boolean = () => true): Promise<EditResult> {
+    if (!canApply()) throw new Error('プラグインは停止しました。');
     if (new TextEncoder().encode(proposal.markdown).byteLength > MAX_EDIT_BYTES) {
       throw new Error('編集提案が大きすぎます (上限 512 KiB)。');
     }
@@ -63,8 +67,15 @@ export class DocumentFacade {
     if (proposal.baseRevision !== this.revision()) {
       throw new Error('確認中に文書が更新されました。最新の内容を読み直してください。');
     }
+    if (!canApply()) throw new Error('プラグインは停止しました。');
 
-    const fragment = markdownParser.parse(proposal.markdown).content;
+    const parsed = markdownParser.parse(proposal.markdown);
+    const inlineSelection = doc.resolve(proposal.from).parent.inlineContent
+      && doc.resolve(proposal.to).parent === doc.resolve(proposal.from).parent;
+    const fragment = inlineSelection && parsed.childCount === 1 && parsed.firstChild?.type.name === 'paragraph'
+      ? parsed.firstChild.content
+      : parsed.content;
+    if (!canApply()) throw new Error('プラグインは停止しました。');
     const transaction = view.state.tr.replaceWith(proposal.from, proposal.to, fragment);
     view.dispatch(transaction);
     const from = proposal.from;
