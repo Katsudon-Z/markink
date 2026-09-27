@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AiModeId } from '../lib/ipc';
 
 /**
@@ -39,9 +39,36 @@ export function AiContextMenu({
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // 画面内に収める
-  const left = Math.max(8, Math.min(x, window.innerWidth - 264));
-  const top = Math.max(8, Math.min(y, window.innerHeight - 260));
+  // 実測サイズで画面内に収める (下端がはみ出すときは上向きに開く)
+  const [pos, setPos] = useState(() => {
+    // 初回描画の一瞬のはみ出しを抑えるため、概算高さで事前クランプする
+    const estH = 340;
+    const estW = 256;
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
+    let top = y;
+    if (y + estH > vh - 8) top = y - estH;
+    top = Math.max(8, Math.min(top, Math.max(8, vh - estH - 8)));
+    const left = Math.max(8, Math.min(x, Math.max(8, vw - estW - 8)));
+    return { left, top };
+  });
+  const updatePos = () => {
+    const el = rootRef.current;
+    if (!el) return;
+    const h = el.offsetHeight || 340;
+    const w = el.offsetWidth || 256;
+    let nextTop = y;
+    if (y + h > window.innerHeight - 8) nextTop = y - h;
+    nextTop = Math.max(8, nextTop);
+    if (nextTop + h > window.innerHeight - 8) nextTop = Math.max(8, window.innerHeight - h - 8);
+    const nextLeft = Math.max(8, Math.min(x, window.innerWidth - w - 8));
+    setPos({ left: nextLeft, top: nextTop });
+  };
+  useLayoutEffect(updatePos, [x, y, hint, enabled]);
+  useEffect(() => {
+    window.addEventListener('resize', updatePos);
+    return () => window.removeEventListener('resize', updatePos);
+  }, [x, y]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -105,7 +132,7 @@ export function AiContextMenu({
       className="ai-context-menu"
       role="menu"
       aria-label="AIメニュー"
-      style={{ left, top }}
+      style={{ left: pos.left, top: pos.top, maxHeight: 'calc(100vh - 16px)', overflowY: 'auto' }}
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >
