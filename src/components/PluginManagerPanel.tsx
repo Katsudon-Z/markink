@@ -1,24 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ipc, type PluginInfo } from '../lib/ipc';
-import type { PluginManifest, PluginPermission } from '../lib/plugins/api';
-import { parsePluginManifest } from '../lib/plugins/manifest';
+import type { PluginPermission } from '../lib/plugins/api';
+import { installedManifest } from '../lib/plugins/info';
 import type { PluginManager, PluginState } from '../lib/plugins/manager';
 
 interface PluginManagerPanelProps {
   manager: PluginManager;
   onClose: () => void;
-}
-
-function toManifest(plugin: PluginInfo): PluginManifest {
-  return parsePluginManifest(JSON.stringify({
-    id: plugin.id, name: plugin.name, version: plugin.version,
-    apiVersion: plugin.apiVersion, permissions: plugin.permissions,
-    networkOrigins: plugin.networkOrigins, settingsFields: plugin.settingsFields,
-    ...(plugin.description ? { description: plugin.description } : {}),
-    ...(plugin.author ? { author: plugin.author } : {}),
-    ...(plugin.entry ? { entry: plugin.entry } : {})
-  }));
 }
 
 export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps) {
@@ -29,6 +18,7 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
   const [busy, setBusy] = useState(false);
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const [hasApiKey, setHasApiKey] = useState<Record<string, boolean>>({});
+  const [pendingUpdates, setPendingUpdates] = useState<Record<string, boolean>>({});
   const [settingValues, setSettingValues] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
@@ -39,6 +29,10 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
       plugin.permissions.includes('secrets.use') ? await ipc.pluginHasApiKey(plugin.id) : false
     ] as const));
     setHasApiKey(Object.fromEntries(keyStates));
+    const pending = await Promise.all(installed.map(async (plugin) => [
+      plugin.id, await ipc.pluginHasPendingUpdate(plugin.id)
+    ] as const));
+    setPendingUpdates(Object.fromEntries(pending));
     const values = await Promise.all(installed.flatMap((plugin) => plugin.settingsFields.map(async (field) => [
       `${plugin.id}:${field.key}`,
       await ipc.pluginGetSetting(plugin.id, field.key) ?? field.defaultValue ?? ''
@@ -60,36 +54,50 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
   const install = async () => {
     setError(null);
     const selected = await open({
-      multiple: false,
+      multiple: true,
       filters: [{ name: 'markink plugin ZIP', extensions: ['zip'] }]
     });
-    if (typeof selected !== 'string') return;
+    const paths = typeof selected === 'string' ? [selected] : selected;
+    if (!paths?.length) return;
     setBusy(true);
     try {
-      const preview = await ipc.pluginPreviewZip(selected);
-      const previous = plugins.find((item) => item.id === preview.id);
-      if (previous && !window.confirm(
-        `「${previous.name} ${previous.version}」を「${preview.name} ${preview.version}」へ更新しますか？\n` +
-        `要求権限: ${preview.permissions.length ? preview.permissions.join(', ') : 'なし'}\n` +
-        `通信先: ${preview.networkOrigins.length ? preview.networkOrigins.join(', ') : 'なし'}\n` +
-        '実行中の場合は停止し、更新後は再度有効化が必要です。'
-      )) return;
-      const wasActive = manager.list().some((item) => item.manifest.id === preview.id && item.state === 'active');
-      if (wasActive) await manager.disable(preview.id);
-      try {
-        await ipc.pluginInstallZip(selected, preview);
-      } catch (installError) {
-        if (wasActive && previous) {
+      const errors: string[] = [];
+      for (const path of paths) {
+        try {
+          const preview = await ipc.pluginPreviewZip(path);
+          const previous = (await ipc.pluginList()).find((item) => item.id === preview.id);
+          if (previous && !window.confirm(
+            `「${previous.name} ${previous.version}」を「${preview.name} ${preview.version}」へ更新しますか？\n` +
+            `要求権限: ${preview.permissions.length ? preview.permissions.join(', ') : 'なし'}\n` +
+            `通信先: ${preview.networkOrigins.length ? preview.networkOrigins.join(', ') : 'なし'}\n` +
+            '実行中の場合は停止し、更新後は再度有効化が必要です。'
+          )) continue;
+          const wasActive = manager.list().some((item) => item.manifest.id === preview.id && item.state === 'active');
+          const wasEnabled = previous && (await ipc.pluginEnabledIds()).includes(preview.id);
+          if (previous) await ipc.pluginSetEnabled(preview.id, false);
+          if (wasActive) await manager.disable(preview.id);
           try {
-            const oldManifest = toManifest(previous);
-            await manager.enable(oldManifest, new Set(oldManifest.permissions as PluginPermission[]));
-          } catch (restoreError) {
-            throw new Error(`更新に失敗し、旧版の再起動にも失敗しました: ${String(installError)} / ${String(restoreError)}`);
+            await ipc.pluginInstallZip(path, preview);
+          } catch (installError) {
+            if (previous) {
+              try {
+                if (wasActive) {
+                  const oldManifest = installedManifest(previous);
+                  await manager.enable(oldManifest, new Set(oldManifest.permissions as PluginPermission[]));
+                }
+                if (wasEnabled) await ipc.pluginSetEnabled(preview.id, true);
+              } catch (restoreError) {
+                throw new Error(`更新に失敗し、旧版の状態復元にも失敗しました: ${String(installError)} / ${String(restoreError)}`);
+              }
+            }
+            throw installError;
           }
+        } catch (cause) {
+          errors.push(`${path}: ${String(cause)}`);
         }
-        throw installError;
       }
       await refresh();
+      if (errors.length) setError(errors.join('\n'));
     } catch (cause) {
       setError(String(cause));
       await refresh().catch(() => {});
@@ -103,8 +111,24 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
     setError(null);
     setBusy(true);
     try {
+      await ipc.pluginSetEnabled(plugin.id, false);
       await manager.disable(plugin.id);
       await ipc.pluginUninstall(plugin.id);
+      await refresh();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rollback = async (plugin: PluginInfo) => {
+    setError(null);
+    setBusy(true);
+    try {
+      await ipc.pluginSetEnabled(plugin.id, false);
+      await manager.disable(plugin.id);
+      await ipc.pluginRollbackUpdate(plugin.id);
       await refresh();
     } catch (cause) {
       setError(String(cause));
@@ -119,6 +143,7 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
     try {
       const state = states[plugin.id] ?? 'disabled';
       if (state === 'active' || state === 'failed') {
+        await ipc.pluginSetEnabled(plugin.id, false);
         await manager.disable(plugin.id);
       } else {
         if (!plugin.entry) throw new Error('実行entryがありません');
@@ -129,8 +154,29 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
           'このZIPは信頼できる発行元から入手したものに限って有効化してください。' +
           'ZIPの発行元署名は検証されず、Workerは外部通信などを完全には制限できません。'
         )) return;
-        const manifest = toManifest(plugin);
-        await manager.enable(manifest, new Set(manifest.permissions as PluginPermission[]));
+        const manifest = installedManifest(plugin);
+        const pendingUpdate = await ipc.pluginHasPendingUpdate(plugin.id);
+        try {
+          await manager.enable(manifest, new Set(manifest.permissions as PluginPermission[]));
+        } catch (startupError) {
+          if (pendingUpdate) {
+            await manager.disable(plugin.id);
+            try {
+              await ipc.pluginRollbackUpdate(plugin.id);
+            } catch (rollbackError) {
+              throw new Error(`新版の起動と旧版の復元に失敗しました: ${String(startupError)} / ${String(rollbackError)}`);
+            }
+            throw new Error(`新版の起動に失敗したため旧版へ戻しました: ${String(startupError)}`);
+          }
+          throw startupError;
+        }
+        if (pendingUpdate) await ipc.pluginCommitUpdate(plugin.id);
+        try {
+          await ipc.pluginSetEnabled(plugin.id, true);
+        } catch (cause) {
+          await manager.disable(plugin.id);
+          throw cause;
+        }
       }
       await refresh();
     } catch (cause) {
@@ -189,10 +235,10 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
 
   return (
     <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="plugin-manager-title">
-      <section className="restore-dialog ai-settings plugin-manager">
+      <section className="restore-dialog settings-dialog plugin-manager">
         <h2 id="plugin-manager-title" className="restore-title">プラグイン管理</h2>
         <p className="restore-message">
-          ZIPを導入し、信頼できるプラグインを有効化できます。有効化はこの起動中のみ有効です。
+          複数のZIPを導入できます。有効にしたプラグインは次回起動時も有効になります。
           ZIPの発行元署名は検証されず、Workerは外部通信などを完全には制限できません。
         </p>
         {error && <p className="plugin-manager-error" role="alert">{error}</p>}
@@ -247,6 +293,7 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
                   </div>
                 )}
                 <div className="plugin-manager-meta">状態: {states[plugin.id] === 'active' ? '実行中' : states[plugin.id] === 'failed' ? '実行失敗' : '停止中'}</div>
+                {pendingUpdates[plugin.id] && <div className="plugin-manager-meta">更新待ち: 新版の起動確認後に旧版を削除します。</div>}
                 {failures[plugin.id] && <div className="plugin-manager-error">{failures[plugin.id]}</div>}
               </div>
               <div className="plugin-manager-buttons">
@@ -254,6 +301,7 @@ export function PluginManagerPanel({ manager, onClose }: PluginManagerPanelProps
                   {states[plugin.id] === 'active' || states[plugin.id] === 'failed' ? '停止' : '有効化'}
                 </button>
                 <button className="btn" disabled={busy} onClick={() => void uninstall(plugin)}>削除</button>
+                {pendingUpdates[plugin.id] && <button className="btn" disabled={busy} onClick={() => void rollback(plugin)}>旧版へ戻す</button>}
               </div>
             </article>
           ))}

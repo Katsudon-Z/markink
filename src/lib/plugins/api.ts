@@ -61,6 +61,7 @@ export interface PluginManifest {
   permissions: PluginPermission[];
   networkOrigins?: string[];
   settingsFields?: PluginSettingField[];
+  fileHashes?: Record<string, string>;
 }
 
 export interface PluginSettingField {

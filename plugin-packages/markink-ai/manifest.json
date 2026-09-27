@@ -6,6 +6,10 @@
   "description": "OpenAI互換 chat/completions APIで要約、続き生成、質問、編集代行を行います。",
   "author": "markink",
   "entry": "index.js",
+  "fileHashes": {
+    "index.js": "af4eda3459dd3963c2a36d5ee9a97cc8faf5da6c559b767f34052bc4e09ed170",
+    "README.md": "225282c6b0fc4bf94953d41cb0972f0f374ef00ea2fa33ccdf1fa3202892a607"
+  },
   "permissions": [
     "document.read", "document.edit", "ui.register", "ui.notify", "ui.dialog",
     "settings.read", "settings.write", "network.request", "secrets.use"

@@ -8,6 +8,7 @@ const WORKER_BOOTSTRAP = `
 const pending = new Map();
 const handlers = new Map();
 let nextRequest = 0;
+let pluginId = '';
 function call(method, args) {
   const requestId = ++nextRequest;
   return new Promise((resolve, reject) => {
@@ -18,6 +19,7 @@ function call(method, args) {
   });
 }
 const api = Object.freeze({
+  get pluginId() { return pluginId; },
   readDocument: () => call('readDocument', null),
   applyEdit: (proposal) => call('applyEdit', proposal),
   notify: (message) => call('notify', message),
@@ -48,6 +50,7 @@ self.onmessage = async (event) => {
     else request.reject(new Error(String(message.error || 'ホスト呼出しに失敗しました')));
   } else if (message.type === 'start') {
     try {
+      pluginId = String(message.pluginId);
       if (!self.markinkPlugin || typeof self.markinkPlugin.activate !== 'function') {
         throw new Error('self.markinkPlugin.activate(api) がありません');
       }
@@ -140,7 +143,7 @@ export class WorkerRuntime implements PluginRuntime {
             this.onFailure(manifest.id, error);
           }
         };
-        worker.postMessage({ type: 'start' });
+        worker.postMessage({ type: 'start', pluginId: manifest.id });
       });
     } catch (error) {
       this.cleanup(manifest.id, running);

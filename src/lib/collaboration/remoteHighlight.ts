@@ -114,7 +114,7 @@ export function remoteHighlightPlugin(): Plugin {
     appendTransaction(trs, oldState, newState) {
       // リモート変更の検知: y-sync の isChangeOrigin メタが第一。
       // キー実体の不一致に備え、addToHistory:false + 文書変化でも拾う
-      // (y-sync の _tr は addToHistory を付けない。AI/人間の通常編集は付けない)。
+      // (y-sync の _tr は addToHistory を付けない。通常のローカル編集は付けない)。
       const remote = trs.some((tr) => {
         if (
           (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | null)?.isChangeOrigin ===

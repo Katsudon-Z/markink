@@ -40,6 +40,8 @@ export interface PluginInfo {
     defaultValue?: string;
     options?: string[];
   }>;
+  fileHashes: Record<string, string>;
+  zipSha256: string | null;
   entry: string | null;
   installed: boolean;
   executable: boolean;
@@ -85,14 +87,22 @@ export const ipc = {
   writePluginLog: (pluginId: string, level: AppSettings['fileLoggingLevel'], message: string) =>
     invoke<void>('plugin_log', { pluginId, level, message }),
   readFileBytes: (path: string) => invoke<number[]>('read_file_bytes', { path }),
-  pluginInstallZip: (zipPath: string, expected: PluginInfo) =>
-    invoke<PluginInfo>('plugin_install_zip', {
-      zipPath, expectedId: expected.id, expectedVersion: expected.version,
+  pluginInstallZip: (zipPath: string, expected: PluginInfo) => {
+    if (!expected.zipSha256) return Promise.reject(new Error('ZIPプレビューのハッシュがありません'));
+    return invoke<PluginInfo>('plugin_install_zip', {
+      zipPath, expectedId: expected.id, expectedName: expected.name,
+      expectedVersion: expected.version, expectedEntry: expected.entry,
+      expectedDescription: expected.description, expectedAuthor: expected.author,
       expectedPermissions: expected.permissions, expectedNetworkOrigins: expected.networkOrigins,
-      expectedSettingsFields: expected.settingsFields
-    }),
+      expectedSettingsFields: expected.settingsFields,
+      expectedFileHashes: expected.fileHashes,
+      expectedZipSha256: expected.zipSha256
+    });
+  },
   pluginPreviewZip: (zipPath: string) => invoke<PluginInfo>('plugin_preview_zip', { zipPath }),
   pluginList: () => invoke<PluginInfo[]>('plugin_list'),
+  pluginEnabledIds: () => invoke<string[]>('plugin_enabled_ids'),
+  pluginSetEnabled: (id: string, enabled: boolean) => invoke<void>('plugin_set_enabled', { id, enabled }),
   pluginReadEntry: (id: string) => invoke<string>('plugin_read_entry', { id }),
   pluginGetSetting: (id: string, key: string) => invoke<string | null>('plugin_get_setting', { id, key }),
   pluginSetSetting: (id: string, key: string, value: string) => invoke<void>('plugin_set_setting', { id, key, value }),
@@ -102,6 +112,9 @@ export const ipc = {
   pluginSetApiKey: (id: string, value: string) => invoke<void>('plugin_set_api_key', { id, value }),
   pluginDeleteApiKey: (id: string) => invoke<void>('plugin_delete_api_key', { id }),
   pluginUninstall: (id: string) => invoke<void>('plugin_uninstall', { id }),
+  pluginHasPendingUpdate: (id: string) => invoke<boolean>('plugin_has_pending_update', { id }),
+  pluginCommitUpdate: (id: string) => invoke<void>('plugin_commit_update', { id }),
+  pluginRollbackUpdate: (id: string) => invoke<void>('plugin_rollback_update', { id }),
   setEditorFont: (font: { sizePx?: number; family?: string }) =>
     invoke<void>('set_editor_font', { font })
 };

@@ -1,12 +1,13 @@
-use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::{Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use zip::{CompressionMethod, ZipArchive};
 
 const MAX_ZIP_BYTES: u64 = 50 * 1024 * 1024;
@@ -34,6 +35,8 @@ pub struct PluginInfo {
     permissions: Vec<String>,
     network_origins: Vec<String>,
     settings_fields: Vec<PluginSettingField>,
+    file_hashes: HashMap<String, String>,
+    zip_sha256: Option<String>,
     entry: Option<String>,
     installed: bool,
     executable: bool,
@@ -205,6 +208,8 @@ struct PluginManifest {
     network_origins: Vec<String>,
     #[serde(default)]
     settings_fields: Vec<PluginSettingField>,
+    #[serde(default)]
+    file_hashes: HashMap<String, String>,
     entry: Option<String>,
 }
 
@@ -223,6 +228,20 @@ const PERMISSIONS: &[&str] = &[
 
 fn plugins_root() -> PathBuf {
     crate::settings::local_dir().join("plugins")
+}
+
+fn read_zip(path: &str) -> Result<(Vec<u8>, String), String> {
+    let archive_path = PathBuf::from(path);
+    let metadata = fs::metadata(&archive_path).map_err(|e| format!("ZIPを開けません: {e}"))?;
+    if !metadata.is_file() || metadata.len() > MAX_ZIP_BYTES {
+        return Err("ZIPファイルが不正か、50 MiBの上限を超えています".into());
+    }
+    let bytes = fs::read(&archive_path).map_err(|e| format!("ZIPを開けません: {e}"))?;
+    if bytes.len() as u64 > MAX_ZIP_BYTES {
+        return Err("ZIPファイルが50 MiBの上限を超えています".into());
+    }
+    let hash = format!("{:x}", Sha256::digest(&bytes));
+    Ok((bytes, hash))
 }
 
 fn valid_id(id: &str) -> bool {
@@ -469,8 +488,14 @@ fn validate_manifest(bytes: &[u8]) -> Result<PluginManifest, String> {
         return Err("manifest の設定項目が多すぎます".into());
     }
     if !manifest.settings_fields.is_empty()
-        && (!manifest.permissions.iter().any(|permission| permission == "settings.read")
-            || !manifest.permissions.iter().any(|permission| permission == "settings.write"))
+        && (!manifest
+            .permissions
+            .iter()
+            .any(|permission| permission == "settings.read")
+            || !manifest
+                .permissions
+                .iter()
+                .any(|permission| permission == "settings.write"))
     {
         return Err("設定項目には settings.read と settings.write 権限が必要です".into());
     }
@@ -481,24 +506,57 @@ fn validate_manifest(bytes: &[u8]) -> Result<PluginManifest, String> {
             || field.label.trim().is_empty()
             || field.label.len() > 120
             || !matches!(field.field_type.as_str(), "text" | "number" | "choice")
-            || field.default_value.as_ref().is_some_and(|value| value.trim().is_empty() || value.len() > 4096)
+            || field
+                .default_value
+                .as_ref()
+                .is_some_and(|value| value.trim().is_empty() || value.len() > 4096)
         {
             return Err("manifest の設定項目が不正です".into());
         }
         if field.field_type == "choice" {
-            let options = field.options.as_ref().ok_or("選択式設定の候補がありません")?;
+            let options = field
+                .options
+                .as_ref()
+                .ok_or("選択式設定の候補がありません")?;
             if !(2..=8).contains(&options.len())
-                || options.iter().any(|value| value.trim().is_empty() || value.len() > 120)
+                || options
+                    .iter()
+                    .any(|value| value.trim().is_empty() || value.len() > 120)
                 || options.iter().collect::<HashSet<_>>().len() != options.len()
-                || field.default_value.as_ref().is_some_and(|value| !options.contains(value))
+                || field
+                    .default_value
+                    .as_ref()
+                    .is_some_and(|value| !options.contains(value))
             {
                 return Err("選択式設定の候補が不正です".into());
             }
         } else if field.options.is_some() {
             return Err("選択式以外の設定に候補は指定できません".into());
         }
-        if field.field_type == "number" && field.default_value.as_ref().is_some_and(|value| value.parse::<f64>().map_or(true, |number| !number.is_finite())) {
+        if field.field_type == "number"
+            && field.default_value.as_ref().is_some_and(|value| {
+                value
+                    .parse::<f64>()
+                    .map_or(true, |number| !number.is_finite())
+            })
+        {
             return Err("数値設定の既定値が不正です".into());
+        }
+    }
+    if manifest.file_hashes.len() > MAX_ENTRIES {
+        return Err("manifest のファイルハッシュが多すぎます".into());
+    }
+    let mut hashed_paths = HashSet::new();
+    for (path, digest) in &manifest.file_hashes {
+        validate_archive_path(path, false)?;
+        if path == "manifest.json"
+            || !hashed_paths.insert(path.to_lowercase())
+            || digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err("manifest のファイルハッシュが不正です".into());
         }
     }
     if let Some(entry) = &manifest.entry {
@@ -564,13 +622,9 @@ fn unique_name() -> String {
 
 #[tauri::command]
 pub fn plugin_preview_zip(zip_path: String) -> Result<PluginInfo, String> {
-    let archive_path = PathBuf::from(zip_path);
-    let metadata = fs::metadata(&archive_path).map_err(|e| format!("ZIPを開けません: {e}"))?;
-    if !metadata.is_file() || metadata.len() > MAX_ZIP_BYTES {
-        return Err("ZIPファイルが不正か、50 MiBの上限を超えています".into());
-    }
-    let file = File::open(&archive_path).map_err(|e| format!("ZIPを開けません: {e}"))?;
-    let mut archive = ZipArchive::new(file).map_err(|e| format!("ZIPとして読み取れません: {e}"))?;
+    let (bytes, zip_sha256) = read_zip(&zip_path)?;
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("ZIPとして読み取れません: {e}"))?;
     if archive.len() == 0 || archive.len() > MAX_ENTRIES {
         return Err(format!("ZIP内のエントリ数は1〜{MAX_ENTRIES}にしてください"));
     }
@@ -596,6 +650,8 @@ pub fn plugin_preview_zip(zip_path: String) -> Result<PluginInfo, String> {
         permissions: manifest.permissions,
         network_origins: manifest.network_origins,
         settings_fields: manifest.settings_fields,
+        file_hashes: manifest.file_hashes,
+        zip_sha256: Some(zip_sha256),
         entry: manifest.entry.clone(),
         installed: false,
         executable: manifest.entry.is_some(),
@@ -606,21 +662,26 @@ pub fn plugin_preview_zip(zip_path: String) -> Result<PluginInfo, String> {
 pub fn plugin_install_zip(
     zip_path: String,
     expected_id: String,
+    expected_name: String,
     expected_version: String,
+    expected_entry: Option<String>,
+    expected_description: Option<String>,
+    expected_author: Option<String>,
     expected_permissions: Vec<String>,
     expected_network_origins: Vec<String>,
     expected_settings_fields: Vec<PluginSettingField>,
+    expected_file_hashes: HashMap<String, String>,
+    expected_zip_sha256: String,
 ) -> Result<PluginInfo, String> {
     if !valid_id(&expected_id) {
         return Err("プラグインIDの形式が不正です".into());
     }
-    let archive_path = PathBuf::from(zip_path);
-    let metadata = fs::metadata(&archive_path).map_err(|e| format!("ZIPを開けません: {e}"))?;
-    if !metadata.is_file() || metadata.len() > MAX_ZIP_BYTES {
-        return Err("ZIPファイルが不正か、50 MiBの上限を超えています".into());
+    let (bytes, actual_zip_sha256) = read_zip(&zip_path)?;
+    if actual_zip_sha256 != expected_zip_sha256 {
+        return Err("ZIPファイルが事前確認時から変更されました".into());
     }
-    let file = File::open(&archive_path).map_err(|e| format!("ZIPを開けません: {e}"))?;
-    let mut archive = ZipArchive::new(file).map_err(|e| format!("ZIPとして読み取れません: {e}"))?;
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("ZIPとして読み取れません: {e}"))?;
     if archive.len() == 0 || archive.len() > MAX_ENTRIES {
         return Err(format!("ZIP内のエントリ数は1〜{MAX_ENTRIES}にしてください"));
     }
@@ -628,9 +689,12 @@ pub fn plugin_install_zip(
     let root = plugins_root();
     let staging_root = root.join("staging");
     let install_root = root.join("installed");
+    let pending_root = root.join("pending");
     fs::create_dir_all(&staging_root).map_err(|e| format!("一時フォルダを作成できません: {e}"))?;
     fs::create_dir_all(&install_root)
         .map_err(|e| format!("プラグインフォルダを作成できません: {e}"))?;
+    fs::create_dir_all(&pending_root)
+        .map_err(|e| format!("更新退避フォルダを作成できません: {e}"))?;
     let stage = staging_root.join(unique_name());
     fs::create_dir(&stage).map_err(|e| format!("一時フォルダを作成できません: {e}"))?;
 
@@ -639,6 +703,7 @@ pub fn plugin_install_zip(
         let mut seen_files: HashSet<String> = HashSet::new();
         let mut total = 0u64;
         let mut manifest_bytes = None;
+        let mut actual_hashes = HashMap::new();
         for index in 0..archive.len() {
             let mut entry = archive
                 .by_index(index)
@@ -708,6 +773,7 @@ pub fn plugin_install_zip(
                 .open(&destination)
                 .map_err(|e| format!("ファイルを作成できません: {e}"))?;
             let mut file_bytes = Vec::new();
+            let mut digest = Sha256::new();
             let mut buffer = [0u8; 16 * 1024];
             loop {
                 let read = entry
@@ -724,6 +790,7 @@ pub fn plugin_install_zip(
                 output
                     .write_all(&buffer[..read])
                     .map_err(|e| format!("ファイルを書き込めません: {e}"))?;
+                digest.update(&buffer[..read]);
                 if name == "manifest.json" {
                     if file_bytes.len() as u64 + read as u64 > MAX_MANIFEST_BYTES {
                         return Err("manifest.json が大きすぎます".into());
@@ -739,6 +806,8 @@ pub fn plugin_install_zip(
             }
             if name == "manifest.json" {
                 manifest_bytes = Some(file_bytes);
+            } else {
+                actual_hashes.insert(name, format!("{:x}", digest.finalize()));
             }
         }
         let manifest = validate_manifest(
@@ -747,12 +816,20 @@ pub fn plugin_install_zip(
                 .ok_or("ZIPルートにmanifest.jsonがありません")?,
         )?;
         if manifest.id != expected_id
+            || manifest.name != expected_name
             || manifest.version != expected_version
+            || manifest.entry != expected_entry
+            || manifest.description != expected_description
+            || manifest.author != expected_author
             || manifest.permissions != expected_permissions
             || manifest.network_origins != expected_network_origins
             || manifest.settings_fields != expected_settings_fields
+            || manifest.file_hashes != expected_file_hashes
         {
             return Err("ZIPのmanifestが事前確認時から変更されました".into());
+        }
+        if !manifest.file_hashes.is_empty() && manifest.file_hashes != actual_hashes {
+            return Err("ZIP内のファイルハッシュがmanifestと一致しません".into());
         }
         if let Some(entry) = &manifest.entry {
             let path = validate_archive_path(entry, false)?;
@@ -769,7 +846,7 @@ pub fn plugin_install_zip(
             }
         }
         let target = install_root.join(&manifest.id);
-        let backup = root.join(format!("backup-{}-{}", manifest.id, unique_name()));
+        let backup = pending_root.join(&manifest.id);
         let had_old = match fs::symlink_metadata(&target) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
                 return Err("既存プラグインの導入先が通常のフォルダではありません".into());
@@ -779,6 +856,11 @@ pub fn plugin_install_zip(
             Err(error) => return Err(format!("既存プラグインを確認できません: {error}")),
         };
         if had_old {
+            if fs::symlink_metadata(&backup).is_ok() {
+                return Err(
+                    "前回の更新が未確定です。新版を有効化するか旧版へ戻してください".into(),
+                );
+            }
             fs::rename(&target, &backup)
                 .map_err(|e| format!("既存プラグインを退避できません: {e}"))?;
         }
@@ -793,9 +875,6 @@ pub fn plugin_install_zip(
             }
             return Err(format!("プラグインを導入できません: {error}"));
         }
-        if had_old {
-            let _ = fs::remove_dir_all(backup);
-        }
         Ok(PluginInfo {
             id: manifest.id,
             name: manifest.name,
@@ -806,6 +885,8 @@ pub fn plugin_install_zip(
             permissions: manifest.permissions,
             network_origins: manifest.network_origins,
             settings_fields: manifest.settings_fields,
+            file_hashes: manifest.file_hashes,
+            zip_sha256: None,
             entry: manifest.entry.clone(),
             installed: true,
             executable: manifest.entry.is_some(),
@@ -834,6 +915,8 @@ fn read_installed(path: &Path) -> Result<PluginInfo, String> {
         permissions: manifest.permissions,
         network_origins: manifest.network_origins,
         settings_fields: manifest.settings_fields,
+        file_hashes: manifest.file_hashes,
+        zip_sha256: None,
         entry: manifest.entry.clone(),
         installed: true,
         executable: manifest.entry.is_some(),
@@ -864,7 +947,14 @@ pub fn plugin_read_entry(id: String) -> Result<String, String> {
     if !metadata.is_file() || metadata.len() > MAX_ENTRY_SOURCE_BYTES {
         return Err("実行entryが不正か、1 MiBを超えています".into());
     }
-    fs::read_to_string(canonical_entry).map_err(|e| format!("実行entryを読めません: {e}"))
+    let source = fs::read(canonical_entry).map_err(|e| format!("実行entryを読めません: {e}"))?;
+    if let Some(expected) = info.file_hashes.get(&entry) {
+        let actual = format!("{:x}", Sha256::digest(&source));
+        if actual != *expected {
+            return Err("実行entryのハッシュがmanifestと一致しません".into());
+        }
+    }
+    String::from_utf8(source).map_err(|_| "実行entryがUTF-8ではありません".into())
 }
 
 #[tauri::command]
@@ -881,16 +971,103 @@ pub fn plugin_list() -> Result<Vec<PluginInfo>, String> {
         if !file_type.is_dir() || file_type.is_symlink() {
             continue;
         }
-        plugins.push(read_installed(&item.path())?);
+        match read_installed(&item.path()) {
+            Ok(plugin) => plugins.push(plugin),
+            Err(error) => log::warn!(
+                "invalid installed plugin {}: {}",
+                item.path().display(),
+                error
+            ),
+        }
     }
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(plugins)
+}
+
+fn pending_update(id: &str) -> Result<Option<PathBuf>, String> {
+    if !valid_id(id) {
+        return Err("プラグインIDの形式が不正です".into());
+    }
+    let path = plugins_root().join("pending").join(id);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(Some(path)),
+        Ok(_) => Err("更新退避先が通常のフォルダではありません".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("更新退避先を確認できません: {error}")),
+    }
+}
+
+#[tauri::command]
+pub fn plugin_has_pending_update(id: String) -> Result<bool, String> {
+    Ok(pending_update(&id)?.is_some())
+}
+
+#[tauri::command]
+pub fn plugin_commit_update(id: String) -> Result<(), String> {
+    if let Some(path) = pending_update(&id)? {
+        let current = plugins_root().join("installed").join(&id);
+        read_installed(&current).map_err(|e| format!("新版を確認できません: {e}"))?;
+        fs::remove_dir_all(path).map_err(|e| format!("旧版の退避を削除できません: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn plugin_rollback_update(id: String) -> Result<(), String> {
+    let backup = pending_update(&id)?.ok_or("復元する旧版がありません")?;
+    read_installed(&backup).map_err(|e| format!("旧版のmanifestが不正です: {e}"))?;
+    let target = plugins_root().join("installed").join(&id);
+    let failed = plugins_root().join("staging").join(unique_name());
+    let has_target = match fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => true,
+        Ok(_) => return Err("現行版の保存先が不正です".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(format!("現行版を確認できません: {error}")),
+    };
+    if has_target {
+        fs::rename(&target, &failed).map_err(|e| format!("失敗した新版を退避できません: {e}"))?;
+    }
+    if let Err(error) = fs::rename(&backup, &target) {
+        if has_target {
+            let _ = fs::rename(&failed, &target);
+        }
+        return Err(format!("旧版を復元できません: {error}"));
+    }
+    if has_target {
+        let _ = fs::remove_dir_all(failed);
+    }
+    Ok(())
+}
+
+pub fn recover_interrupted_updates() {
+    let pending = plugins_root().join("pending");
+    let Ok(items) = fs::read_dir(pending) else {
+        return;
+    };
+    for item in items.flatten() {
+        let Some(id) = item.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if !valid_id(&id) {
+            continue;
+        }
+        let target = plugins_root().join("installed").join(&id);
+        if !target.exists() || read_installed(&target).is_err() {
+            if let Err(error) = plugin_rollback_update(id.clone()) {
+                eprintln!("markink: プラグイン {id} の更新復旧に失敗しました: {error}");
+            }
+        }
+    }
 }
 
 #[tauri::command]
 pub fn plugin_uninstall(id: String) -> Result<(), String> {
     if !valid_id(&id) {
         return Err("プラグインIDの形式が不正です".into());
+    }
+    crate::plugin_state::plugin_set_enabled(id.clone(), false)?;
+    if let Some(path) = pending_update(&id)? {
+        fs::remove_dir_all(path).map_err(|e| format!("旧版の退避を削除できません: {e}"))?;
     }
     let target = plugins_root().join("installed").join(&id);
     if !target.exists() {

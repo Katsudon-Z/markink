@@ -20,7 +20,9 @@ import { ExtensionHost } from './lib/plugins/extensionHost';
 import { PluginManagerPanel } from './components/PluginManagerPanel';
 import { PluginManager } from './lib/plugins/manager';
 import { WorkerRuntime } from './lib/plugins/workerRuntime';
+import { installedManifest } from './lib/plugins/info';
 import type { RegisteredCommand } from './lib/plugins/commands';
+import type { PluginPermission } from './lib/plugins/api';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
@@ -49,6 +51,7 @@ function App() {
   const [fontFamily, setFontFamily] = useState('');
 
   const viewRef = useRef<EditorView | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
   const dirRef = useRef<string | null>(null);
   const pathRef = useRef<string | null>(null);
   const getView = useCallback(() => viewRef.current, []);
@@ -283,13 +286,18 @@ function App() {
     extensionHost.commands.getSnapshot
   );
   const pluginManagerRef = useRef<PluginManager | null>(null);
-  const [busyPluginId, setBusyPluginId] = useState<string | null>(null);
+  const [busyPlugins, setBusyPlugins] = useState<Record<string, number>>({});
   const runPluginCommand = useCallback(async (item: RegisteredCommand) => {
-    setBusyPluginId(item.pluginId);
+    setBusyPlugins((current) => ({ ...current, [item.pluginId]: (current[item.pluginId] ?? 0) + 1 }));
     try {
       await item.run();
     } finally {
-      setBusyPluginId((current) => current === item.pluginId ? null : current);
+      setBusyPlugins((current) => {
+        const next = { ...current };
+        if ((next[item.pluginId] ?? 0) <= 1) delete next[item.pluginId];
+        else next[item.pluginId] -= 1;
+        return next;
+      });
     }
   }, []);
   const displayPluginCommands = useMemo(() => pluginCommands.map((item) => ({
@@ -333,9 +341,32 @@ function App() {
     createHostApi: (manifest, permissions) => extensionHost.createApi(manifest, permissions)
   }), [extensionHost, notifyHuman]);
   pluginManagerRef.current = pluginManager;
+  const pluginRestoreStarted = useRef(false);
+  useEffect(() => {
+    if (!editorReady || pluginRestoreStarted.current) return;
+    pluginRestoreStarted.current = true;
+    void (async () => {
+      try {
+        const [installed, enabledIds] = await Promise.all([ipc.pluginList(), ipc.pluginEnabledIds()]);
+        const enabled = new Set(enabledIds);
+        for (const plugin of installed) {
+          if (!enabled.has(plugin.id)) continue;
+          try {
+            const manifest = installedManifest(plugin);
+            await pluginManager.enable(manifest, new Set(manifest.permissions as PluginPermission[]));
+          } catch (error) {
+            notifyHuman(`プラグイン ${plugin.id} を再開できません: ${String(error)}`);
+          }
+        }
+      } catch (error) {
+        notifyHuman(`プラグインの有効状態を復元できません: ${String(error)}`);
+      }
+    })();
+  }, [editorReady, pluginManager, notifyHuman]);
   const handleReady = useCallback(
     (view: EditorView) => {
       viewRef.current = view;
+      setEditorReady(true);
       void autosave.loadRestoreCandidate();
     },
     [autosave]
@@ -476,9 +507,9 @@ function App() {
       )}
 
       {editConfirm && (
-        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="ai-confirm-title">
+        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="edit-confirm-title">
           <div className="restore-dialog">
-            <h2 id="ai-confirm-title" className="restore-title">文書編集の確認</h2>
+            <h2 id="edit-confirm-title" className="restore-title">文書編集の確認</h2>
             <p className="restore-message">{editConfirm.summary}</p>
             <div className="restore-actions">
               <button className="btn btn-primary" onClick={() => editConfirm.resolve(true)}>
@@ -545,11 +576,14 @@ function App() {
           <button className="btn" onClick={() => setShowPlugins((v) => !v)}>プラグイン</button>
         </div>
         <div className="app-status">
-          {busyPluginId && (
-            <button className="btn" title="実行中のプラグインを停止" onClick={() => {
-              void pluginManagerRef.current?.disable(busyPluginId).catch((error) => notifyHuman(String(error)));
-            }}>プラグイン処理中 · 停止</button>
-          )}
+          {Object.keys(busyPlugins).map((id) => (
+            <button key={id} className="btn" title={`${id} を停止`} onClick={() => {
+              void (async () => {
+                await ipc.pluginSetEnabled(id, false);
+                await pluginManagerRef.current?.disable(id);
+              })().catch((error) => notifyHuman(String(error)));
+            }}>{id} · 停止</button>
+          ))}
           {collab.active && (
             <span className="app-status-badge collab" title="共同編集中">
               共同編集中 ({collab.peers.length}人)
@@ -612,9 +646,9 @@ function App() {
 
       {pluginResult && (
         <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="plugin-result-title">
-          <div className="restore-dialog ai-settings">
+          <div className="restore-dialog settings-dialog">
             <h2 id="plugin-result-title" className="restore-title">{pluginResult.title}</h2>
-            <pre className="ai-settings-code ai-result-pre">{pluginResult.text}</pre>
+            <pre className="settings-dialog-code plugin-result-pre">{pluginResult.text}</pre>
             <div className="restore-actions">
               <button className="btn btn-primary" onClick={() => pluginResult.resolve('insert')}>挿入</button>
               {pluginResult.canReplace && <button className="btn" onClick={() => pluginResult.resolve('replace')}>選択範囲を置換</button>}
@@ -656,14 +690,14 @@ function App() {
       </main>
 
       {pluginMenu && (
-        <div ref={pluginMenuRef} className="ai-context-menu" style={{ position: 'fixed', left: Math.min(pluginMenu.x, window.innerWidth - 270), top: Math.min(pluginMenu.y, window.innerHeight - 260), zIndex: 1000 }}>
+        <div ref={pluginMenuRef} className="plugin-context-menu" style={{ position: 'fixed', left: Math.min(pluginMenu.x, window.innerWidth - 270), top: Math.min(pluginMenu.y, window.innerHeight - 260), zIndex: 1000 }}>
           {pluginCommands.filter((item) => item.command.contextMenu).map((item) => (
-            <button key={item.key} className="ai-menu-item" onClick={() => {
+            <button key={item.key} className="plugin-menu-item" onClick={() => {
               setPluginMenu(null);
               void runPluginCommand(item).catch((error) => notifyHuman(String(error)));
             }}>{item.command.title}</button>
           ))}
-          <button className="ai-menu-item" onClick={() => setPluginMenu(null)}>閉じる</button>
+          <button className="plugin-menu-item" onClick={() => setPluginMenu(null)}>閉じる</button>
         </div>
       )}
 
@@ -731,9 +765,9 @@ function App() {
 
       {markdownSource != null && (
         <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="md-source-title">
-          <div className="restore-dialog ai-settings">
+          <div className="restore-dialog settings-dialog">
             <h2 id="md-source-title" className="restore-title">Markdownソース (読み取り専用)</h2>
-            <pre className="ai-settings-code ai-result-pre">{markdownSource}</pre>
+            <pre className="settings-dialog-code plugin-result-pre">{markdownSource}</pre>
             <div className="restore-actions">
               <button
                 className="btn"
@@ -755,8 +789,8 @@ function App() {
       )}
 
       {notice && (
-        <div className="ai-toast" role="status" key={notice.id}>
-          <span className="ai-toast-name">プラグイン</span>
+        <div className="plugin-toast" role="status" key={notice.id}>
+          <span className="plugin-toast-name">プラグイン</span>
           <span>{notice.message}</span>
         </div>
       )}

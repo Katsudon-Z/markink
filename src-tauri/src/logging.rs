@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const ARCHIVE_COUNT: usize = 3;
@@ -21,6 +22,7 @@ struct LoggerState {
 }
 
 static LOGGER: OnceLock<FileLogger> = OnceLock::new();
+static PLUGIN_RATE: OnceLock<Mutex<HashMap<String, (Instant, u32)>>> = OnceLock::new();
 
 fn parse_level(level: &str) -> Result<log::LevelFilter, String> {
     match level {
@@ -100,6 +102,21 @@ pub fn plugin_log(plugin_id: String, level: String, message: String) -> Result<(
     if message.len() > 4096 {
         return Err("ログメッセージが長すぎます".into());
     }
+    let rate = PLUGIN_RATE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut rate = rate
+        .lock()
+        .map_err(|_| "プラグインログの制限を確認できません")?;
+    let now = Instant::now();
+    rate.retain(|_, (started, _)| now.duration_since(*started) < Duration::from_secs(60));
+    if rate.len() >= 256 && !rate.contains_key(&plugin_id) {
+        return Err("プラグインログの送信元が多すぎます".into());
+    }
+    let state = rate.entry(plugin_id.clone()).or_insert((now, 0));
+    if state.1 >= 120 {
+        return Err("プラグインログは1分間に120件までです".into());
+    }
+    state.1 += 1;
+    drop(rate);
     match level.as_str() {
         "error" => log::error!(target: "plugin", "[{}] {}", plugin_id, message),
         "warn" => log::warn!(target: "plugin", "[{}] {}", plugin_id, message),

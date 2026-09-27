@@ -141,11 +141,6 @@
   pointer-events: none;
 }
 
-/* AIカーソルの選択範囲 (薄い紫) */
-.mdn-ai-selection {
-  background: rgba(124, 58, 237, 0.15);
-}
-
 /* 共同編集での他者の修正箇所 (薄い色 → 10秒で透明に) */
 .mdn-remote-change {
   border-radius: 2px;

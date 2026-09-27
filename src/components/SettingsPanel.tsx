@@ -82,10 +82,10 @@ export function SettingsPanel({
 
   return (
     <div className="restore-overlay" role="dialog" aria-modal="true" aria-label="設定">
-      <div className="restore-dialog ai-settings">
+      <div className="restore-dialog settings-dialog">
         <h2 className="restore-title">設定</h2>
-        {settingsError && <p className="ai-settings-error" role="alert">{settingsError}</p>}
-        <div className="ai-settings-row">
+        {settingsError && <p className="settings-dialog-error" role="alert">{settingsError}</p>}
+        <div className="settings-dialog-row">
           <span>
             前回保存していない内容の復元 <small>(ON のときのみ自動保存し、異常終了時に復元を提案します)</small>
           </span>
@@ -103,8 +103,8 @@ export function SettingsPanel({
           </p>
         )}
 
-        <h3 className="ai-settings-heading">自分の名前 (共同編集で表示)</h3>
-        <div className="ai-settings-row">
+        <h3 className="settings-dialog-heading">自分の名前 (共同編集で表示)</h3>
+        <div className="settings-dialog-row">
           <span>名前 <small>(空ならPCのログインユーザ名)</small></span>
           <input
             type="text"
@@ -113,13 +113,13 @@ export function SettingsPanel({
             onChange={(e) => setUserName(e.target.value)}
             onBlur={saveName}
             aria-label="共同編集で表示する自分の名前"
-            className="ai-menu-input"
+            className="plugin-menu-input"
             style={{ position: 'static' }}
           />
         </div>
 
-        <h3 className="ai-settings-heading">表示</h3>
-        <div className="ai-settings-row">
+        <h3 className="settings-dialog-heading">表示</h3>
+        <div className="settings-dialog-row">
           <span>行番号を表示する</span>
           <input
             type="checkbox"
@@ -128,7 +128,7 @@ export function SettingsPanel({
             aria-label="行番号ガターを表示する"
           />
         </div>
-        <div className="ai-settings-row">
+        <div className="settings-dialog-row">
           <span>文字サイズ (px)</span>
           <input
             type="number"
@@ -143,7 +143,7 @@ export function SettingsPanel({
             aria-label="エディタの文字サイズ"
           />
         </div>
-        <div className="ai-settings-row">
+        <div className="settings-dialog-row">
           <span>フォント</span>
           <select
             value={
@@ -163,8 +163,8 @@ export function SettingsPanel({
           </select>
         </div>
 
-        <h3 className="ai-settings-heading">画像</h3>
-        <div className="ai-settings-row">
+        <h3 className="settings-dialog-heading">画像</h3>
+        <div className="settings-dialog-row">
           <span>画像（リンク）のパス記録方式</span>
           <select
             value={imagePathMode}
@@ -183,8 +183,8 @@ export function SettingsPanel({
           「画像（コピー）」は常にassetsへコピーします。
         </p>
 
-        <h3 className="ai-settings-heading">ログ</h3>
-        <div className="ai-settings-row">
+        <h3 className="settings-dialog-heading">ログ</h3>
+        <div className="settings-dialog-row">
           <span>ログをファイルに出力する</span>
           <input
             type="checkbox"
@@ -197,7 +197,7 @@ export function SettingsPanel({
             aria-label="ログをファイルに出力する"
           />
         </div>
-        <div className="ai-settings-row">
+        <div className="settings-dialog-row">
           <span>ログレベル</span>
           <select
             value={fileLoggingLevel}
@@ -216,12 +216,12 @@ export function SettingsPanel({
         </div>
         <p className="restore-message">設定はすぐに反映されます。ログはアプリのローカルデータ領域に保存されます。</p>
 
-        <h3 className="ai-settings-heading">ショートカットキー</h3>
+        <h3 className="settings-dialog-heading">ショートカットキー</h3>
         <button className="btn" onClick={() => setShowShortcuts((v) => !v)}>
           {showShortcuts ? '一覧を閉じる' : '一覧を表示'}
         </button>
         {showShortcuts && (
-          <div className="ai-shortcut-list">
+          <div className="shortcut-list">
             <p className="restore-message">編集</p>
             <ul>
               {EDITOR_SHORTCUTS.map((s) => (
@@ -240,12 +240,12 @@ export function SettingsPanel({
             </ul>
           </div>
         )}
-        <h3 className="ai-settings-heading">バージョン情報</h3>
-        <div className="ai-settings-row">
+        <h3 className="settings-dialog-heading">バージョン情報</h3>
+        <div className="settings-dialog-row">
           <span>markink</span>
           <strong>{appVersion ? `バージョン ${appVersion}` : '確認中…'}</strong>
         </div>
-        <div className="ai-settings-row">
+        <div className="settings-dialog-row">
           <span>公式サイト</span>
           <button
             className="btn"

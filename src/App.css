@@ -77,13 +77,7 @@ html, body {
   border: 1px solid #b7dfc3;
 }
 
-.app-status-badge.ai {
-  background: #7c3aed;
-  color: #fff;
-  border: 1px solid #6d28d9;
-}
-
-/* AI処理中はドットを点滅させて目立たせる */
+/* プラグイン処理中はドットを点滅させる */
 .app-status-badge.processing::before {
   animation: app-status-pulse 1s ease-in-out infinite;
 }
@@ -273,6 +267,7 @@ html, body {
 }
 
 .plugin-manager-error {
+  white-space: pre-wrap;
   color: #a00;
   overflow-wrap: anywhere;
 }
@@ -333,20 +328,8 @@ html, body {
   text-overflow: ellipsis;
 }
 
-/* AI接続バッジ (ステータスバー内) */
-.status-ai-badge {
-  display: inline-block;
-  margin-right: 8px;
-  padding: 0 8px;
-  border-radius: 10px;
-  background: #7c3aed;
-  color: #fff;
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-/* AIからの通知トースト (右下) */
-.ai-toast {
+/* プラグイン通知 (右下) */
+.plugin-toast {
   position: fixed;
   right: 16px;
   bottom: 40px;
@@ -361,7 +344,7 @@ html, body {
   z-index: 100;
 }
 
-.ai-toast-name {
+.plugin-toast-name {
   display: inline-block;
   margin-right: 6px;
   padding: 0 6px;
@@ -370,19 +353,19 @@ html, body {
   font-size: 11px;
 }
 
-/* AI設定パネル */
-.ai-settings {
+/* 設定ダイアログ */
+.settings-dialog {
   max-width: 34em;
   max-height: 85vh;
   overflow-y: auto;
 }
 
-.ai-settings-heading {
+.settings-dialog-heading {
   font-size: 14px;
   margin: 16px 0 4px;
 }
 
-.ai-settings-row {
+.settings-dialog-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -391,22 +374,16 @@ html, body {
   font-size: 13px;
 }
 
-.ai-settings-row small {
+.settings-dialog-row small {
   color: #666;
 }
 
-.ai-settings-row code {
+.settings-dialog-row code {
   font-size: 12px;
   word-break: break-all;
 }
 
-.ai-settings-token {
-  max-width: 22em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ai-settings-code {
+.settings-dialog-code {
   font-size: 12px;
   background: #f4f4f4;
   border: 1px solid #ddd;
@@ -418,21 +395,14 @@ html, body {
   overflow-y: auto;
 }
 
-.ai-settings-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 8px 0;
-}
-
-.ai-settings-error {
+.settings-dialog-error {
   color: #b91c1c;
   font-size: 13px;
 }
 
 
-/* エディタ右クリックのAIメニュー */
-.ai-context-menu {
+/* エディタ右クリックのプラグインメニュー */
+.plugin-context-menu {
   position: fixed;
   z-index: 1200;
   width: 256px;
@@ -442,12 +412,7 @@ html, body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   padding: 4px;
 }
-.ai-menu-info {
-  font-size: 12px;
-  color: #666;
-  padding: 6px 8px;
-}
-.ai-menu-item {
+.plugin-menu-item {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -459,14 +424,14 @@ html, body {
   cursor: pointer;
   text-align: left;
 }
-.ai-menu-item:hover {
+.plugin-menu-item:hover {
   background: #f0f0f0;
 }
-.ai-menu-item small {
+.plugin-menu-item small {
   color: #888;
   font-size: 11px;
 }
-.ai-menu-input {
+.plugin-menu-input {
   width: calc(100% - 16px);
   margin: 4px 8px;
   padding: 6px 8px;
@@ -474,20 +439,12 @@ html, body {
   border-radius: 4px;
   font-size: 13px;
 }
-.ai-menu-hint {
-  font-size: 12px;
-  color: #b45309;
-  padding: 2px 8px 6px;
-}
-.ai-menu-sub span {
-  color: #1d4ed8;
-}
-.ai-result-pre {
+.plugin-result-pre {
   max-height: 20em;
 }
 
 /* 設定内のショートカットキー一覧 */
-.ai-shortcut-list {
+.shortcut-list {
   margin: 8px 0;
   padding: 8px 12px;
   background: #f7f7f7;
@@ -496,17 +453,17 @@ html, body {
   font-size: 13px;
 }
 
-.ai-shortcut-list ul {
+.shortcut-list ul {
   list-style: none;
   padding-left: 0;
   margin: 4px 0 8px;
 }
 
-.ai-shortcut-list li {
+.shortcut-list li {
   padding: 2px 0;
 }
 
-.ai-shortcut-list code {
+.shortcut-list code {
   background: #fff;
   border: 1px solid #ccc;
   border-radius: 3px;

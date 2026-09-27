@@ -102,6 +102,26 @@ function parseSettingsFields(value: unknown): NonNullable<PluginManifest['settin
   return fields;
 }
 
+function parseFileHashes(value: unknown): Record<string, string> {
+  if (!record(value) || Object.keys(value).length > 256) {
+    throw new Error('manifest の fileHashes が不正です。');
+  }
+  const hashes: Record<string, string> = Object.create(null);
+  const paths = new Set<string>();
+  for (const [path, digest] of Object.entries(value)) {
+    if (!path || path === 'manifest.json' || path.length > 240 || path.includes('\\')
+      || path.startsWith('/') || /^[a-zA-Z]:/.test(path)
+      || path.split('/').some((part) => !part || part === '.' || part === '..')
+      || paths.has(path.toLowerCase())
+      || typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
+      throw new Error('manifest のファイルハッシュが不正です。');
+    }
+    paths.add(path.toLowerCase());
+    hashes[path] = digest;
+  }
+  return hashes;
+}
+
 export function parsePluginManifest(source: string): PluginManifest {
   if (new TextEncoder().encode(source).byteLength > 64 * 1024) {
     throw new Error('manifest.json が大きすぎます。');
@@ -143,6 +163,7 @@ export function parsePluginManifest(source: string): PluginManifest {
     permissions,
     ...(value.networkOrigins === undefined ? {} : { networkOrigins: parseOrigins(value.networkOrigins) }),
     ...(value.settingsFields === undefined ? {} : { settingsFields: parseSettingsFields(value.settingsFields) }),
+    ...(value.fileHashes === undefined ? {} : { fileHashes: parseFileHashes(value.fileHashes) }),
     ...(value.description === undefined
       ? {}
       : { description: requiredString(value.description, 'description', 2000) }),

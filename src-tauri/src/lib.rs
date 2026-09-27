@@ -7,6 +7,7 @@ mod fsutil;
 mod legacy_migration;
 mod logging;
 mod plugin_secrets;
+mod plugin_state;
 mod plugins;
 mod settings;
 mod startup;
@@ -26,7 +27,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(|_app| {
+            plugins::recover_interrupted_updates();
             if let Err(error) = legacy_migration::run() {
                 eprintln!("markink: 旧設定の移行に失敗しました: {error}");
             }
@@ -38,7 +40,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = _app.get_webview_window("main") {
                     window.set_content_protected(false)?;
                 }
             }
@@ -87,6 +89,11 @@ pub fn run() {
             plugins::plugin_set_api_key,
             plugins::plugin_delete_api_key,
             plugins::plugin_uninstall,
+            plugins::plugin_has_pending_update,
+            plugins::plugin_commit_update,
+            plugins::plugin_rollback_update,
+            plugin_state::plugin_enabled_ids,
+            plugin_state::plugin_set_enabled,
             logging::plugin_log
         ])
         .run(tauri::generate_context!())

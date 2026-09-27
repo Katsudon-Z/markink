@@ -20,6 +20,7 @@ tauri-build = { version = "2.6.3", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
 log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-dialog = "2"
@@ -38,8 +39,9 @@ zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Security_Credentials", "Win32_Foundation", "Win32_Storage_FileSystem"] }
 
-# 起動時間と配布サイズの改善 (軽量 LTO + 単一コード生成単位 + デバッグ情報削除)
+# 配布サイズを優先して最適化
 [profile.release]
-lto = "thin"
+lto = "fat"
 codegen-units = 1
+opt-level = "z"
 strip = true

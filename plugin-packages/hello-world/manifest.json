@@ -6,5 +6,9 @@
   "description": "現在の選択位置に HelloWorld を書き込みます。",
   "author": "markink test fixtures",
   "entry": "index.js",
+  "fileHashes": {
+    "index.js": "2b3de6635edb6d12f2dbfdd20281cba1b315caa6407f40134e6b0fcef200f09f",
+    "README.md": "87e58b960df33b0a711715c64d80673b54928ab2a6a674c926adfcce942c4fb2"
+  },
   "permissions": ["document.read", "document.edit", "ui.register"]
 }
