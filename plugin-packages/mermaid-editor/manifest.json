@@ -1,0 +1,22 @@
+{
+  "id": "markink.mermaid-editor",
+  "name": "Mermaid エディタ",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Mermaid記法で図を作成し、プレビュー、文書への挿入、再編集を行います。",
+  "author": "markink",
+  "entry": "index.js",
+  "permissions": [
+    "document.read",
+    "document.edit",
+    "ui.register",
+    "ui.dialog",
+    "package.read"
+  ],
+  "fileHashes": {
+    "index.js": "9b62096221dfe2e5a3feda2e0a21952ce664b0a6658c749d9dcf9396056663ba",
+    "mermaid.bundle.js": "97b6f0b6cdbbe12266f6975aef0b73952d29e3abb43052d383f77099fac272f7",
+    "README.md": "8a235314c55bed653c2b7b1e3345ec7c1f7d59b9649a75db4d90c5ded118229f",
+    "THIRD_PARTY_NOTICES.txt": "600031cd8d73a56288146babca4eac3750bc85788e8643205f621498688f566a"
+  }
+}

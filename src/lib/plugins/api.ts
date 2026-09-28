@@ -25,6 +25,7 @@ export interface DocumentSnapshot {
   selectedText: string;
   textBeforeCursor: string;
   selectedImage: { src: string; alt: string; from: number; to: number } | null;
+  selectedCodeBlock: { params: string; text: string; from: number; to: number } | null;
 }
 
 export interface EditProposal {
@@ -90,6 +91,8 @@ export interface PluginHostApi {
   readDocument(): Promise<DocumentSnapshot>;
   applyEdit(proposal: EditProposal): Promise<EditResult>;
   registerCommand(command: PluginCommand, handler: () => void | Promise<void>): Promise<() => void>;
+  /** Renders code blocks with the given language in a sandboxed iframe. */
+  registerCodeBlockRenderer(language: string, html: string): Promise<() => void>;
   notify(message: string): Promise<void>;
   log(event: PluginLogEvent): Promise<void>;
   /** Non-secret, plugin-scoped string setting. */

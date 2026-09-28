@@ -1,7 +1,7 @@
 import { ipc } from '../ipc';
 import type { PluginHostApi, PluginId, PluginManifest, PluginRuntime, PluginCommand, EditProposal, PluginLogEvent } from './api';
 
-const START_TIMEOUT_MS = 10_000;
+const START_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 15 * 60_000;
 
 const WORKER_BOOTSTRAP = `
@@ -38,6 +38,10 @@ const api = Object.freeze({
     try { await call('registerCommand', command); }
     catch (error) { handlers.delete(command.id); throw error; }
     return async () => { handlers.delete(command.id); await call('unregisterCommand', command.id); };
+  },
+  registerCodeBlockRenderer: async (language, html) => {
+    await call('registerCodeBlockRenderer', { language, html });
+    return async () => { await call('unregisterCodeBlockRenderer', language); };
   }
 });
 self.onmessage = async (event) => {
@@ -284,6 +288,24 @@ export class WorkerRuntime implements PluginRuntime {
             || typeof command.title !== 'string') throw new Error('コマンドが不正です');
           const unregister = await running.host.registerCommand(command, () => this.invoke(running, command.id));
           running.registrations.set(command.id, unregister);
+          break;
+        }
+        case 'registerCodeBlockRenderer': {
+          const args = message.args as { language?: unknown; html?: unknown } | null;
+          if (!args || typeof args.language !== 'string' || typeof args.html !== 'string') {
+            throw new Error('コードブロック描画の要求が不正です');
+          }
+          const key = `renderer:${args.language}`;
+          if (running.registrations.has(key)) throw new Error('コードブロック描画は登録済みです');
+          const unregister = await running.host.registerCodeBlockRenderer(args.language, args.html);
+          running.registrations.set(key, unregister);
+          break;
+        }
+        case 'unregisterCodeBlockRenderer': {
+          if (typeof message.args !== 'string') throw new Error('描画言語が不正です');
+          const key = `renderer:${message.args}`;
+          running.registrations.get(key)?.();
+          running.registrations.delete(key);
           break;
         }
         case 'unregisterCommand': {

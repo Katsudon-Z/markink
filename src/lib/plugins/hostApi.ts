@@ -18,6 +18,7 @@ export interface PluginHostApiOptions {
     command: PluginCommand,
     handler: () => void | Promise<void>
   ) => Promise<() => void>;
+  registerCodeBlockRenderer: (pluginId: PluginId, language: string, html: string) => () => void;
   notify: (message: string) => void | Promise<void>;
   log: (pluginId: PluginId, event: PluginLogEvent) => void | Promise<void>;
   getSetting: (pluginId: PluginId, key: string) => Promise<string | null>;
@@ -83,6 +84,23 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
       };
       registrations.add(dispose);
       return dispose;
+    },
+    registerCodeBlockRenderer: async (language: string, html: string) => {
+      requirePermission('ui.register');
+      if (!/^[a-z][a-z0-9_-]{0,31}$/.test(language)) throw new Error('描画言語が不正です。');
+      if (!html.trim() || new TextEncoder().encode(html).byteLength > 16 * 1024 * 1024) {
+        throw new Error('描画HTMLが不正です。');
+      }
+      const unregister = options.registerCodeBlockRenderer(options.pluginId, language, html);
+      if (disposed) {
+        unregister();
+        throw new Error(`プラグイン ${options.pluginId} は停止しました。`);
+      }
+      registrations.add(unregister);
+      return () => {
+        registrations.delete(unregister);
+        unregister();
+      };
     },
     notify: async (message: string) => {
       requirePermission('ui.notify');

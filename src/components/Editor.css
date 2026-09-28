@@ -212,6 +212,21 @@
   padding: 0;
 }
 
+.markink-code-preview {
+  margin: 0.5em 0;
+  border: 1px solid #d7dde7;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.markink-code-preview iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+  pointer-events: none;
+}
+
 /* フォーカス時のスタイル */
 .ProseMirror-focused {
   outline: none;

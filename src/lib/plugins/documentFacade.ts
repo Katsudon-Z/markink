@@ -29,6 +29,31 @@ export class DocumentFacade {
       from: selection.from,
       to: selection.to
     } : null;
+    let selectedCodeBlock: DocumentSnapshot['selectedCodeBlock'] = null;
+    if (selectedNode?.type.name === 'code_block') {
+      selectedCodeBlock = {
+        params: String(selectedNode.attrs.params ?? ''),
+        text: selectedNode.textContent,
+        from: selection.from,
+        to: selection.to
+      };
+    } else {
+      for (let depth = selection.$from.depth; depth > 0; depth -= 1) {
+        const node = selection.$from.node(depth);
+        if (node.type.name !== 'code_block') continue;
+        const from = selection.$from.before(depth);
+        const to = selection.$from.after(depth);
+        if (selection.to <= to) {
+          selectedCodeBlock = {
+            params: String(node.attrs.params ?? ''),
+            text: node.textContent,
+            from,
+            to
+          };
+        }
+        break;
+      }
+    }
     if (new TextEncoder().encode(markdown).byteLength > MAX_SNAPSHOT_BYTES) {
       throw new Error('文書が大きすぎるため、拡張APIでは全文を返せません。');
     }
@@ -43,7 +68,8 @@ export class DocumentFacade {
       size: view.state.doc.content.size,
       selectedText: view.state.doc.textBetween(view.state.selection.from, view.state.selection.to, '\n'),
       textBeforeCursor: view.state.doc.textBetween(Math.max(0, view.state.selection.from - 100000), view.state.selection.from, '\n'),
-      selectedImage
+      selectedImage,
+      selectedCodeBlock
     };
   }
 

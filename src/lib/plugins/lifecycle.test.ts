@@ -38,6 +38,7 @@ describe('plugin lifecycle', () => {
       permissions: new Set(['ui.register']),
       document: {} as DocumentFacade,
       registerCommand: () => new Promise((resolve) => { finishRegistration = resolve; }),
+      registerCodeBlockRenderer: () => () => {},
       notify: () => {},
       log: () => {},
       getSetting: async () => null,

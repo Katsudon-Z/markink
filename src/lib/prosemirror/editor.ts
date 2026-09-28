@@ -4,6 +4,7 @@ import { schema } from './schema';
 import { markdownParser, markdownSerializer } from './markdown';
 import { createBasePlugins } from './plugins';
 import { imageNodeView } from './image';
+import { codeBlockNodeView } from './codeBlockRenderers';
 
 export { undo, redo } from 'prosemirror-history';
 export { schema, markdownParser, markdownSerializer };
@@ -31,7 +32,8 @@ export function createEditorView(
     attributes: { spellcheck: 'false' },
     // 画像は保存形式に関わらずローカル解決して描画する (相対/file/リモート対応)
     nodeViews: {
-      image: imageNodeView(() => getDocDir?.() ?? null)
+      image: imageNodeView(() => getDocDir?.() ?? null),
+      code_block: codeBlockNodeView
     },
     dispatchTransaction(tr) {
       const newState = view.state.apply(tr);

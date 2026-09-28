@@ -8,6 +8,7 @@ import type { NetworkResponse } from './api';
 import { PluginCommandRegistry } from './commands';
 import { DocumentFacade } from './documentFacade';
 import { createPluginHostApi } from './hostApi';
+import { registerCodeBlockRenderer } from '../prosemirror/codeBlockRenderers';
 
 export interface ExtensionHostOptions {
   getView: ConstructorParameters<typeof DocumentFacade>[0]['getView'];
@@ -54,7 +55,8 @@ export class ExtensionHost {
       readPackageText: this.options.readPackageText,
       cancelDialogs: this.options.cancelDialogs,
       registerCommand: (pluginId, command, handler) =>
-        Promise.resolve(this.commands.register(pluginId, command, handler))
+        Promise.resolve(this.commands.register(pluginId, command, handler)),
+      registerCodeBlockRenderer
     });
   }
 }
