@@ -82,6 +82,7 @@ pub fn run() {
             plugins::plugin_list,
             plugins::plugin_preview_zip,
             plugins::plugin_read_entry,
+            plugins::plugin_read_package_text,
             plugins::plugin_get_setting,
             plugins::plugin_set_setting,
             plugins::plugin_request_json,

@@ -1,10 +1,11 @@
 import type { EditorView } from 'prosemirror-view';
+import { NodeSelection } from 'prosemirror-state';
 import { markdownParser, markdownSerializer } from '../prosemirror/markdown';
 import { getDocumentRevision } from '../document/revision';
 import type { DocumentSnapshot, EditProposal, EditResult } from './api';
 
-const MAX_EDIT_BYTES = 512 * 1024;
-const MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;
+const MAX_EDIT_BYTES = 2 * 1024 * 1024;
+const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 
 export interface DocumentFacadeOptions {
   getView: () => EditorView | null;
@@ -20,6 +21,14 @@ export class DocumentFacade {
   read(): DocumentSnapshot {
     const view = this.requireView();
     const markdown = markdownSerializer.serialize(view.state.doc);
+    const selection = view.state.selection;
+    const selectedNode = selection instanceof NodeSelection ? selection.node : null;
+    const selectedImage = selectedNode?.type.name === 'image' ? {
+      src: String(selectedNode.attrs.src ?? ''),
+      alt: String(selectedNode.attrs.alt ?? ''),
+      from: selection.from,
+      to: selection.to
+    } : null;
     if (new TextEncoder().encode(markdown).byteLength > MAX_SNAPSHOT_BYTES) {
       throw new Error('文書が大きすぎるため、拡張APIでは全文を返せません。');
     }
@@ -33,14 +42,15 @@ export class DocumentFacade {
       revision: this.revision(),
       size: view.state.doc.content.size,
       selectedText: view.state.doc.textBetween(view.state.selection.from, view.state.selection.to, '\n'),
-      textBeforeCursor: view.state.doc.textBetween(Math.max(0, view.state.selection.from - 100000), view.state.selection.from, '\n')
+      textBeforeCursor: view.state.doc.textBetween(Math.max(0, view.state.selection.from - 100000), view.state.selection.from, '\n'),
+      selectedImage
     };
   }
 
   async applyEdit(proposal: EditProposal, canApply: () => boolean = () => true): Promise<EditResult> {
     if (!canApply()) throw new Error('プラグインは停止しました。');
     if (new TextEncoder().encode(proposal.markdown).byteLength > MAX_EDIT_BYTES) {
-      throw new Error('編集提案が大きすぎます (上限 512 KiB)。');
+      throw new Error('編集提案が大きすぎます (上限 2 MiB)。');
     }
     const view = this.requireView();
     const { doc } = view.state;

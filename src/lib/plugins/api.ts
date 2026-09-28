@@ -13,7 +13,8 @@ export type PluginPermission =
   | 'settings.read'
   | 'settings.write'
   | 'network.request'
-  | 'secrets.use';
+  | 'secrets.use'
+  | 'package.read';
 
 export interface DocumentSnapshot {
   title: string;
@@ -23,6 +24,7 @@ export interface DocumentSnapshot {
   size: number;
   selectedText: string;
   textBeforeCursor: string;
+  selectedImage: { src: string; alt: string; from: number; to: number } | null;
 }
 
 export interface EditProposal {
@@ -97,6 +99,10 @@ export interface PluginHostApi {
   requestJson(url: string, body: string, useApiKey?: boolean, timeoutSecs?: number): Promise<NetworkResponse>;
   prompt(label: string, initialValue?: string): Promise<string | null>;
   showResult(title: string, text: string, canReplace: boolean): Promise<'insert' | 'replace' | 'cancel'>;
+  /** Reads a UTF-8 resource declared in this plugin's fileHashes. */
+  readPackageText(path: string): Promise<string>;
+  /** Opens plugin-provided HTML in an isolated iframe. The iframe posts a string result to its parent. */
+  openEditor(title: string, html: string): Promise<string | null>;
   /** Host lifecycle hook; unregisters all UI and event registrations owned by this plugin. */
   dispose(): Promise<void>;
 }

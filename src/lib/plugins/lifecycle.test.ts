@@ -44,7 +44,9 @@ describe('plugin lifecycle', () => {
       setSetting: async () => {},
       requestJson: async () => ({ status: 200, body: '' }),
       prompt: async () => null,
-      showResult: async () => 'cancel'
+      showResult: async () => 'cancel',
+      openEditor: async () => null,
+      readPackageText: async () => ''
     });
 
     const registration = api.registerCommand({ id: 'hello', title: 'Hello', placement: 'menu' }, () => {});

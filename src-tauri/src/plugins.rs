@@ -14,7 +14,8 @@ const MAX_ZIP_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
-const MAX_ENTRY_SOURCE_BYTES: u64 = 1024 * 1024;
+const MAX_ENTRY_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_PACKAGE_RESOURCE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_ENTRIES: usize = 256;
 const MAX_COMPRESSION_RATIO: u64 = 200;
 static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
@@ -224,6 +225,7 @@ const PERMISSIONS: &[&str] = &[
     "settings.write",
     "network.request",
     "secrets.use",
+    "package.read",
 ];
 
 fn plugins_root() -> PathBuf {
@@ -559,6 +561,11 @@ fn validate_manifest(bytes: &[u8]) -> Result<PluginManifest, String> {
             return Err("manifest のファイルハッシュが不正です".into());
         }
     }
+    if manifest.permissions.iter().any(|permission| permission == "package.read")
+        && manifest.file_hashes.is_empty()
+    {
+        return Err("package.read には fileHashes の指定が必要です".into());
+    }
     if let Some(entry) = &manifest.entry {
         validate_archive_path(entry, false)?;
     }
@@ -842,7 +849,7 @@ pub fn plugin_install_zip(
             if entry_bytes.len() as u64 > MAX_ENTRY_SOURCE_BYTES
                 || std::str::from_utf8(&entry_bytes).is_err()
             {
-                return Err("実行entryは1 MiB以下のUTF-8 JavaScriptにしてください".into());
+                return Err("実行entryは8 MiB以下のUTF-8 JavaScriptにしてください".into());
             }
         }
         let target = install_root.join(&manifest.id);
@@ -945,7 +952,7 @@ pub fn plugin_read_entry(id: String) -> Result<String, String> {
     }
     let metadata = fs::metadata(&canonical_entry).map_err(|e| e.to_string())?;
     if !metadata.is_file() || metadata.len() > MAX_ENTRY_SOURCE_BYTES {
-        return Err("実行entryが不正か、1 MiBを超えています".into());
+        return Err("実行entryが不正か、8 MiBを超えています".into());
     }
     let source = fs::read(canonical_entry).map_err(|e| format!("実行entryを読めません: {e}"))?;
     if let Some(expected) = info.file_hashes.get(&entry) {
@@ -955,6 +962,46 @@ pub fn plugin_read_entry(id: String) -> Result<String, String> {
         }
     }
     String::from_utf8(source).map_err(|_| "実行entryがUTF-8ではありません".into())
+}
+
+/// Reads one hash-declared UTF-8 resource from the caller's installed package.
+#[tauri::command]
+pub fn plugin_read_package_text(id: String, path: String) -> Result<String, String> {
+    if !valid_id(&id) || path.len() > 240 || path == "manifest.json" {
+        return Err("プラグインまたは資源の指定が不正です".into());
+    }
+    let relative = validate_archive_path(&path, false)?;
+    let directory = plugins_root().join("installed").join(&id);
+    let directory_meta = fs::symlink_metadata(&directory)
+        .map_err(|e| format!("導入済みプラグインを確認できません: {e}"))?;
+    if !directory_meta.is_dir() || directory_meta.file_type().is_symlink() {
+        return Err("導入済みプラグインの保存先が不正です".into());
+    }
+    let info = read_installed(&directory)?;
+    if !info.permissions.iter().any(|permission| permission == "package.read") {
+        return Err("package.read 権限がありません".into());
+    }
+    let expected = info.file_hashes.get(&path)
+        .ok_or("資源はmanifestのfileHashesに宣言してください")?;
+    let canonical_root = fs::canonicalize(&directory).map_err(|e| e.to_string())?;
+    let requested = directory.join(relative);
+    let metadata = fs::symlink_metadata(&requested)
+        .map_err(|e| format!("資源を開けません: {e}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_PACKAGE_RESOURCE_BYTES {
+        return Err("資源が不正か、8 MiBを超えています".into());
+    }
+    let canonical_file = fs::canonicalize(&requested)
+        .map_err(|e| format!("資源を開けません: {e}"))?;
+    if !canonical_file.starts_with(&canonical_root) {
+        return Err("資源がプラグイン保存先の外を指しています".into());
+    }
+    let bytes = fs::read(&canonical_file).map_err(|e| format!("資源を読めません: {e}"))?;
+    if bytes.len() as u64 > MAX_PACKAGE_RESOURCE_BYTES
+        || format!("{:x}", Sha256::digest(&bytes)) != *expected {
+        return Err("資源のサイズまたはハッシュがmanifestと一致しません".into());
+    }
+    String::from_utf8(bytes).map_err(|_| "資源がUTF-8ではありません".into())
 }
 
 #[tauri::command]

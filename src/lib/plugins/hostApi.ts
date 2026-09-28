@@ -25,6 +25,8 @@ export interface PluginHostApiOptions {
   requestJson: (pluginId: PluginId, url: string, body: string, useApiKey: boolean, timeoutSecs: number) => Promise<NetworkResponse>;
   prompt: (pluginId: PluginId, label: string, initialValue: string) => Promise<string | null>;
   showResult: (pluginId: PluginId, title: string, text: string, canReplace: boolean) => Promise<'insert' | 'replace' | 'cancel'>;
+  openEditor: (pluginId: PluginId, title: string, html: string) => Promise<string | null>;
+  readPackageText: (pluginId: PluginId, path: string) => Promise<string>;
   cancelDialogs?: (pluginId: PluginId) => void;
 }
 
@@ -124,6 +126,21 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
         throw new Error('結果表示の内容が不正です。');
       }
       return options.showResult(options.pluginId, title, content, canReplace);
+    },
+    openEditor: async (title: string, html: string) => {
+      requirePermission('ui.dialog');
+      if (!title.trim() || title.length > 120 || new TextEncoder().encode(html).byteLength > 16 * 1024 * 1024) {
+        throw new Error('編集画面の内容が不正です。');
+      }
+      return options.openEditor(options.pluginId, title, html);
+    },
+    readPackageText: async (path: string) => {
+      requirePermission('package.read');
+      if (!path || path.length > 240 || path.includes('\\') || path.startsWith('/')
+        || path.split('/').some((part) => !part || part === '.' || part === '..')) {
+        throw new Error('プラグイン資源のパスが不正です。');
+      }
+      return options.readPackageText(options.pluginId, path);
     },
     dispose: async () => {
       disposed = true;

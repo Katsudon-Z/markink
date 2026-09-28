@@ -104,6 +104,7 @@ export const ipc = {
   pluginEnabledIds: () => invoke<string[]>('plugin_enabled_ids'),
   pluginSetEnabled: (id: string, enabled: boolean) => invoke<void>('plugin_set_enabled', { id, enabled }),
   pluginReadEntry: (id: string) => invoke<string>('plugin_read_entry', { id }),
+  pluginReadPackageText: (id: string, path: string) => invoke<string>('plugin_read_package_text', { id, path }),
   pluginGetSetting: (id: string, key: string) => invoke<string | null>('plugin_get_setting', { id, key }),
   pluginSetSetting: (id: string, key: string, value: string) => invoke<void>('plugin_set_setting', { id, key, value }),
   pluginRequestJson: (id: string, requestUrl: string, body: string, useApiKey: boolean, timeoutSecs: number) =>

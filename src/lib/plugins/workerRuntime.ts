@@ -12,7 +12,7 @@ let pluginId = '';
 function call(method, args) {
   const requestId = ++nextRequest;
   return new Promise((resolve, reject) => {
-    const timeout = method === 'prompt' || method === 'showResult' ? 15 * 60_000 : 135000;
+    const timeout = method === 'prompt' || method === 'showResult' || method === 'openEditor' ? 15 * 60_000 : 135000;
     const timer = setTimeout(() => { pending.delete(requestId); reject(new Error('ホスト応答がタイムアウトしました')); }, timeout);
     pending.set(requestId, { resolve, reject, timer });
     self.postMessage({ type: 'request', requestId, method, args });
@@ -29,6 +29,8 @@ const api = Object.freeze({
   requestJson: (url, body, useApiKey = false, timeoutSecs = 120) => call('requestJson', { url, body, useApiKey, timeoutSecs }),
   prompt: (label, initialValue = '') => call('prompt', { label, initialValue }),
   showResult: (title, text, canReplace = false) => call('showResult', { title, text, canReplace }),
+  openEditor: (title, html) => call('openEditor', { title, html }),
+  readPackageText: (path) => call('readPackageText', path),
   registerCommand: async (command, handler) => {
     if (typeof handler !== 'function') throw new Error('コマンドhandlerが不正です');
     if (handlers.has(command.id)) throw new Error('コマンドIDが重複しています');
@@ -201,7 +203,7 @@ export class WorkerRuntime implements PluginRuntime {
     if (running.stopping || message.type !== 'request' || !Number.isSafeInteger(message.requestId)) return;
     const requestId = message.requestId as number;
     try {
-      if (JSON.stringify(message).length > 1_200_000) throw new Error('要求が大きすぎます');
+      if (JSON.stringify(message).length > 20 * 1024 * 1024) throw new Error('要求が大きすぎます');
       let value: unknown;
       switch (message.method) {
         case 'readDocument': value = await running.host.readDocument(); break;
@@ -261,6 +263,19 @@ export class WorkerRuntime implements PluginRuntime {
             throw new Error('結果表示の要求が不正です');
           }
           value = await running.host.showResult(args.title, args.text, args.canReplace);
+          break;
+        }
+        case 'openEditor': {
+          const args = message.args as { title?: unknown; html?: unknown } | null;
+          if (!args || typeof args.title !== 'string' || typeof args.html !== 'string') {
+            throw new Error('編集画面の要求が不正です');
+          }
+          value = await running.host.openEditor(args.title, args.html);
+          break;
+        }
+        case 'readPackageText': {
+          if (typeof message.args !== 'string') throw new Error('プラグイン資源のパスが不正です');
+          value = await running.host.readPackageText(message.args);
           break;
         }
         case 'registerCommand': {

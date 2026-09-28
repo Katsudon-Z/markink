@@ -10,7 +10,8 @@ const PERMISSIONS = new Set<PluginPermission>([
   'settings.read',
   'settings.write',
   'network.request',
-  'secrets.use'
+  'secrets.use',
+  'package.read'
 ]);
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{2,63}$/;
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -173,6 +174,9 @@ export function parsePluginManifest(source: string): PluginManifest {
   if (manifest.settingsFields?.length
     && (!permissions.includes('settings.read') || !permissions.includes('settings.write'))) {
     throw new Error('設定項目には settings.read と settings.write 権限が必要です。');
+  }
+  if (permissions.includes('package.read') && !Object.keys(manifest.fileHashes ?? {}).length) {
+    throw new Error('package.read には fileHashes の指定が必要です。');
   }
   return manifest;
 }

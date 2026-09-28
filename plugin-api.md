@@ -41,7 +41,7 @@ self.markinkPlugin = {
 };
 ```
 
-entry は 1 MiB 以下の UTF-8 JavaScript です。追加のファイルを ZIP に含められますが、現行ランタイムは entry を単一スクリプトとして Worker に読み込みます。実行時の `import`、`require`、ZIP 内ファイルの読み込みはサポートしません。依存コードは entry に束ねてください。
+entry は 8 MiB 以下の UTF-8 JavaScript です。entry は単一スクリプトとして Worker に読み込みます。実行時の `import` と `require` はサポートしません。追加の UTF-8 ファイルは `package.read` 権限と `readPackageText()` で読み込めます。
 
 ## manifest.json
 
@@ -84,17 +84,43 @@ entry は 1 MiB 以下の UTF-8 JavaScript です。追加のファイルを ZIP
 | `ui.notify` | `notify(message)` | 通知を表示。最大 4096 文字。 |
 | `ui.dialog` | `prompt(label, initialValue?)` | 文字列を入力。キャンセル時は `null`。 |
 | `ui.dialog` | `showResult(title, text, canReplace)` | 結果を表示。`insert`、`replace`、`cancel` を返す。 |
+| `ui.dialog` | `openEditor(title, html)` | プラグイン提供の HTML を sandbox 付き iframe で表示。`parent.postMessage({ type: 'markink-editor-result', value: string }, '*')` で結果を返す。キャンセル時は `null`。 |
 | `log.write` | `log({ level, message, fields? })` | 本体のログ設定に従いプラグインログを出力。 |
 | `settings.read` | `getSetting(key)` | プラグイン固有の文字列設定を取得。未設定時は `null`。 |
 | `settings.write` | `setSetting(key, value)` | プラグイン固有の文字列設定を保存。16 KiB まで。秘密値には使わない。 |
 | `network.request` | `requestJson(url, body, useApiKey?, timeoutSecs?)` | 許可 origin へ JSON POST。`{ status, body }` を返す。 |
 | `secrets.use` | `requestJson(..., true)` | Windows 資格情報ストア内の API キーを Bearer ヘッダーで付与。秘密値は Worker に返さない。 |
+| `package.read` | `readPackageText(path)` | 同じZIPに同梱し、`fileHashes` に記載したUTF-8ファイルを読む。1ファイル8 MiBまで。 |
 
 プラグインログは 1 ID あたり 1 分間に 120 件までです。本文、API キー、HTTP 要求・応答をログに書かないでください。
 
 `registerCommand` の `command` は `{ id, title, placement: 'menu', shortcut?, contextMenu? }` です。`id` は同じプラグイン内で一意にします。`shortcut` は `Mod-KeyS`、`Mod-Shift-KeyQ`、`Mod-Space` の形式です。`contextMenu: true` で右クリックメニューにも表示します。同じショートカットを複数のプラグインが使う場合は、先に登録されたコマンドがキー操作を受けます。メニューからは各コマンドを選べます。
 
 `readDocument()` の `selection.from` と `selection.to`、`size` は Markdown 文字列の位置ではなく、ProseMirror 文書の位置です。編集には取得した `revision` を `baseRevision` として渡してください。文書が変わった場合は再取得が必要です。
+
+画像ノードを選択している場合、`readDocument()` は `selectedImage: { src, alt, from, to }` を返します。それ以外は `null` です。図形エディタのようなプラグインは、画像の出所を確認してからこの範囲を `applyEdit()` で置き換えられます。
+
+`openEditor()` の HTML は 16 MiB 以下、戻り値は 2 MiB 以下です。Workerからホストへの要求全体は20 MiBまでです。iframe は `allow-scripts` のみの sandbox で動き、Tauri API やホストの DOM にはアクセスできません。HTML 内のネットワーク通信は CSP で禁止し、インラインとblobのスクリプトを許可します。プラグイン停止時はダイアログも閉じられます。`applyEdit()` のMarkdownは2 MiB、`readDocument()` のMarkdownは16 MiBまでです。
+
+Mermaidのような描画ライブラリは、ブラウザーで動く単一のJavaScriptファイルにビルドしてZIPへ同梱できます。manifestの `permissions` に `package.read` を加え、そのファイルを `fileHashes` に記載してください。Workerで `const code = await api.readPackageText('mermaid.bundle.js')` と読み、編集画面のHTMLに渡します。画面内でコードをblob URLのスクリプトとして読み込めます。分割チャンクの動的importやCDNへのアクセスには対応しません。図の原文をプラグイン側で保存し、編集時に復元してください。
+
+たとえば編集画面用HTMLの生成時に、ライブラリのテキストを安全なJavaScript文字列へ変換できます。
+
+```js
+const code = await api.readPackageText('mermaid.bundle.js');
+const literal = JSON.stringify(code).replace(/</g, '\\u003c');
+const html = `<script>
+  const source = ${literal};
+  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+  const script = document.createElement('script');
+  script.src = url;
+  script.onload = () => URL.revokeObjectURL(url);
+  document.head.append(script);
+<\/script>`;
+await api.openEditor('Mermaid', html);
+```
+
+実際のエディタではscriptの読み込み完了後にMermaidの初期化とプレビューを行います。返却する文字列にはMermaid原文と生成結果を含め、プラグイン側で検査してから `applyEdit()` してください。
 
 `requestJson()` の要求本文は最大 512 KiB、応答は最大 2 MiB、タイムアウトは 5〜120 秒です。リダイレクトと任意ヘッダーは使えません。API キーはプラグイン管理画面で利用者が保存します。Windows 以外での秘密値 API は現在未対応です。
 
@@ -106,4 +132,4 @@ ZIP は 50 MiB、展開合計は 100 MiB、ファイル数は 256 件までで�
 
 `fileHashes` はZIP内の破損や差し替え検知に使います。manifest自身や配布者の身元を証明する仕組みではありません。アプリはプレビュー時と導入時に ZIP 全体の SHA-256 を照合し、確認したバイト列から展開します。
 
-完全な例は `plugin-packages/hello-world/` と `plugin-packages/markink-ai/` にあります。利用者へ配布するものは ZIP ファイルのみです。
+完全な例は `plugin-packages/hello-world/`、`plugin-packages/markink-ai/`、`plugin-packages/shape-editor/` にあります。利用者へ配布するものは ZIP ファイルのみです。

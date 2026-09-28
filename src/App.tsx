@@ -241,8 +241,11 @@ function App() {
   } | null>(null);
   const pluginResultPending = useRef(false);
   const pluginResultRef = useRef<{ pluginId: string; resolve: (choice: 'insert' | 'replace' | 'cancel') => void } | null>(null);
+  const [pluginEditor, setPluginEditor] = useState<{ title: string; html: string; resolve: (value: string | null) => void } | null>(null);
+  const pluginEditorRef = useRef<{ pluginId: string; resolve: (value: string | null) => void } | null>(null);
+  const pluginEditorFrame = useRef<HTMLIFrameElement | null>(null);
   const showPluginResult = useCallback((pluginId: string, title: string, text: string, canReplace: boolean) => {
-    if (pluginResultPending.current) return Promise.reject(new Error('別の結果を表示中です'));
+    if (pluginResultPending.current || pluginEditorRef.current) return Promise.reject(new Error('別のダイアログを表示中です'));
     pluginResultPending.current = true;
     return new Promise<'insert' | 'replace' | 'cancel'>((resolve) => {
       const finish = (choice: 'insert' | 'replace' | 'cancel') => {
@@ -255,10 +258,35 @@ function App() {
       setPluginResult({ title, text, canReplace, resolve: finish });
     });
   }, []);
+  const openPluginEditor = useCallback((pluginId: string, title: string, html: string) => {
+    if (pluginEditorRef.current || pluginResultPending.current) return Promise.reject(new Error('別のダイアログを表示中です'));
+    return new Promise<string | null>((resolve) => {
+      const finish = (value: string | null) => {
+        pluginEditorRef.current = null;
+        setPluginEditor(null);
+        resolve(value);
+      };
+      pluginEditorRef.current = { pluginId, resolve: finish };
+      setPluginEditor({ title, html, resolve: finish });
+    });
+  }, []);
+  useEffect(() => {
+    if (!pluginEditor) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== pluginEditorFrame.current?.contentWindow) return;
+      const data = event.data as { type?: unknown; value?: unknown } | null;
+      if (!data || data.type !== 'markink-editor-result' || typeof data.value !== 'string'
+        || new TextEncoder().encode(data.value).byteLength > 2 * 1024 * 1024) return;
+      pluginEditor.resolve(data.value);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [pluginEditor]);
   const cancelPluginDialogs = useCallback((pluginId: string) => {
     if (pluginResultRef.current?.pluginId === pluginId) {
       pluginResultRef.current.resolve('cancel');
     }
+    if (pluginEditorRef.current?.pluginId === pluginId) pluginEditorRef.current.resolve(null);
   }, []);
   const extensionHost = useMemo(
     () =>
@@ -276,9 +304,11 @@ function App() {
         requestJson: (pluginId, url, body, useApiKey, timeoutSecs) => ipc.pluginRequestJson(pluginId, url, body, useApiKey, timeoutSecs),
         prompt: (_pluginId, label, initialValue) => Promise.resolve(window.prompt(label, initialValue)),
         showResult: showPluginResult,
+        openEditor: openPluginEditor,
+        readPackageText: (pluginId, path) => ipc.pluginReadPackageText(pluginId, path),
         cancelDialogs: cancelPluginDialogs
       }),
-    [getView, getDocumentTitle, confirmPluginReplace, notifyHuman, showPluginResult, cancelPluginDialogs]
+    [getView, getDocumentTitle, confirmPluginReplace, notifyHuman, showPluginResult, openPluginEditor, cancelPluginDialogs]
   );
   const pluginCommands = useSyncExternalStore(
     extensionHost.commands.subscribe,
@@ -654,6 +684,22 @@ function App() {
               {pluginResult.canReplace && <button className="btn" onClick={() => pluginResult.resolve('replace')}>選択範囲を置換</button>}
               <button className="btn" onClick={() => pluginResult.resolve('cancel')}>閉じる</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {pluginEditor && (
+        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="plugin-editor-title">
+          <div className="restore-dialog plugin-editor-dialog">
+            <h2 id="plugin-editor-title" className="restore-title">{pluginEditor.title}</h2>
+            <iframe
+              ref={pluginEditorFrame}
+              title={pluginEditor.title}
+              sandbox="allow-scripts"
+              referrerPolicy="no-referrer"
+              srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' blob:; img-src data: blob:; connect-src 'none'; form-action 'none'">${pluginEditor.html}`}
+            />
+            <div className="restore-actions"><button className="btn" onClick={() => pluginEditor.resolve(null)}>キャンセル</button></div>
           </div>
         </div>
       )}

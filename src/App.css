@@ -443,6 +443,23 @@ html, body {
   max-height: 20em;
 }
 
+.plugin-editor-dialog {
+  width: min(960px, 96vw);
+  max-width: none;
+  height: min(720px, 94vh);
+  display: flex;
+  flex-direction: column;
+}
+
+.plugin-editor-dialog iframe {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: white;
+}
+
 /* 設定内のショートカットキー一覧 */
 .shortcut-list {
   margin: 8px 0;

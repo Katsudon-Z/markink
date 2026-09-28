@@ -20,6 +20,8 @@ export interface ExtensionHostOptions {
   requestJson: (pluginId: string, url: string, body: string, useApiKey: boolean, timeoutSecs: number) => Promise<NetworkResponse>;
   prompt: (pluginId: string, label: string, initialValue: string) => Promise<string | null>;
   showResult: (pluginId: string, title: string, text: string, canReplace: boolean) => Promise<'insert' | 'replace' | 'cancel'>;
+  openEditor: (pluginId: string, title: string, html: string) => Promise<string | null>;
+  readPackageText: (pluginId: string, path: string) => Promise<string>;
   cancelDialogs?: (pluginId: string) => void;
 }
 
@@ -48,6 +50,8 @@ export class ExtensionHost {
       requestJson: this.options.requestJson,
       prompt: this.options.prompt,
       showResult: this.options.showResult,
+      openEditor: this.options.openEditor,
+      readPackageText: this.options.readPackageText,
       cancelDialogs: this.options.cancelDialogs,
       registerCommand: (pluginId, command, handler) =>
         Promise.resolve(this.commands.register(pluginId, command, handler))
