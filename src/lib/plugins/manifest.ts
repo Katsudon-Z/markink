@@ -11,7 +11,9 @@ const PERMISSIONS = new Set<PluginPermission>([
   'settings.write',
   'network.request',
   'secrets.use',
-  'package.read'
+  'package.read',
+  'clipboard.write',
+  'office.copy'
 ]);
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{2,63}$/;
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;

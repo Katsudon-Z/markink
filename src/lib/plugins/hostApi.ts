@@ -18,7 +18,7 @@ export interface PluginHostApiOptions {
     command: PluginCommand,
     handler: () => void | Promise<void>
   ) => Promise<() => void>;
-  registerCodeBlockRenderer: (pluginId: PluginId, language: string, html: string) => () => void;
+  registerCodeBlockRenderer: (pluginId: PluginId, language: string, html: string, clipboard: boolean, office: boolean) => () => void;
   notify: (message: string) => void | Promise<void>;
   log: (pluginId: PluginId, event: PluginLogEvent) => void | Promise<void>;
   getSetting: (pluginId: PluginId, key: string) => Promise<string | null>;
@@ -91,7 +91,9 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
       if (!html.trim() || new TextEncoder().encode(html).byteLength > 16 * 1024 * 1024) {
         throw new Error('描画HTMLが不正です。');
       }
-      const unregister = options.registerCodeBlockRenderer(options.pluginId, language, html);
+      const unregister = options.registerCodeBlockRenderer(
+        options.pluginId, language, html, permissions.has('clipboard.write'), permissions.has('office.copy')
+      );
       if (disposed) {
         unregister();
         throw new Error(`プラグイン ${options.pluginId} は停止しました。`);

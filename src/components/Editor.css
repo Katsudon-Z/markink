@@ -224,8 +224,16 @@
   display: block;
   width: 100%;
   border: 0;
-  pointer-events: none;
 }
+
+.markink-code-block.ProseMirror-selectednode .markink-code-preview {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.markink-code-insert-zone { height: 8px; cursor: text; }
+.markink-code-insert-zone[hidden] { display: none; }
+.markink-code-insert-zone:hover { background: #eff6ff; }
 
 /* フォーカス時のスタイル */
 .ProseMirror-focused {

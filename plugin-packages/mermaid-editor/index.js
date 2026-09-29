@@ -90,10 +90,102 @@ function renderHtml(bundle) {
     body{margin:0;padding:12px;background:#fff;color:#334155;font:13px Meiryo,sans-serif;overflow:hidden}
     #diagram svg{display:block;max-width:100%;height:auto;margin:auto}
     #error{color:#b91c1c;white-space:pre-wrap;overflow-wrap:anywhere}
-  </style><div id="diagram"></div><div id="error"></div><script>
+    #copy-menu{display:none;position:fixed;z-index:10;min-width:180px;padding:4px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 4px 16px #0003}
+    #copy-menu button{display:block;width:100%;border:0;background:none;text-align:left;padding:8px;cursor:pointer;font:13px Meiryo,sans-serif}
+    #copy-menu button:hover{background:#e8f0ff}
+  </style><div id="diagram"></div><div id="error"></div><div id="copy-menu"><button data-format="text">Mermaid記法</button><button data-format="powerpoint">PowerPoint図</button><button data-format="png">PNG</button></div><script>
     const diagram=document.getElementById('diagram');
     const error=document.getElementById('error');
+    const menu=document.getElementById('copy-menu');
     const reportHeight=()=>parent.postMessage({type:'markink-render-height',height:document.body.scrollHeight+24},'*');
+    const toPoint=(svg,x,y)=>{
+      const matrix=svg.getScreenCTM();
+      if(!matrix)throw new Error('図の位置を取得できません');
+      const p=new DOMPoint(x,y).matrixTransform(matrix.inverse());
+      return [p.x,p.y];
+    };
+    const bounds=(svg,element)=>{
+      const r=element.getBoundingClientRect();
+      const a=toPoint(svg,r.left,r.top),b=toPoint(svg,r.right,r.bottom);
+      return {x:a[0],y:a[1],w:b[0]-a[0],h:b[1]-a[1]};
+    };
+    function officeDrawing(){
+      const source=window.markinkCodeBlockSource.replace(/^---\\s*\\n[\\s\\S]*?\\n---\\s*\\n/,'').trimStart();
+      if(!/^(?:flowchart|graph)\\s+(?:TB|TD|BT|LR|RL)\\b/.test(source))throw new Error('PowerPoint図はフローチャートに対応しています');
+      const svg=diagram.querySelector('svg');
+      if(!svg)throw new Error('描画が完了していません');
+      const nodes=[...svg.querySelectorAll('g.node')].map((node)=>{
+        const box=bounds(svg,node),shape=node.querySelector('rect,ellipse,circle,polygon,path');
+        const tag=shape?.tagName.toLowerCase();
+        const kind=tag==='ellipse'||tag==='circle'?'ellipse':tag==='polygon'||tag==='path'?'diamond':'rectangle';
+        const label=(node.querySelector('.label')||node).textContent.trim().slice(0,1000);
+        return {...box,kind,label};
+      }).filter((node)=>node.w>0&&node.h>0);
+      if(!nodes.length||nodes.length>200)throw new Error('PowerPoint図のノード数が範囲外です');
+      const edges=[];
+      for(const path of svg.querySelectorAll('.edgePath path, path.flowchart-link')){
+        if(typeof path.getTotalLength!=='function')continue;
+        const length=path.getTotalLength();
+        const matrix=path.getScreenCTM(),svgMatrix=svg.getScreenCTM();
+        if(!matrix||!svgMatrix||!Number.isFinite(length))continue;
+        const points=[];
+        const steps=Math.max(1,Math.min(24,Math.ceil(length/40)));
+        for(let i=0;i<=steps;i++){
+          const p=path.getPointAtLength(length*i/steps).matrixTransform(matrix).matrixTransform(svgMatrix.inverse());
+          points.push([p.x,p.y]);
+        }
+        edges.push({points,arrow:Boolean(path.getAttribute('marker-end'))});
+      }
+      const labels=[...svg.querySelectorAll('.edgeLabel')].map((item)=>({...bounds(svg,item),label:item.textContent.trim().slice(0,1000)})).filter((item)=>item.label&&item.w>0);
+      const viewBox=svg.viewBox.baseVal;
+      return JSON.stringify({minX:viewBox.x,minY:viewBox.y,width:viewBox.width||svg.getBoundingClientRect().width,height:viewBox.height||svg.getBoundingClientRect().height,shapes:nodes,lines:edges,texts:labels});
+    }
+    async function pngData(){
+      const svg=diagram.querySelector('svg');
+      if(!svg)throw new Error('描画が完了していません');
+      const box=svg.getBoundingClientRect(),width=Math.max(1,Math.ceil(box.width*2)),height=Math.max(1,Math.ceil(box.height*2));
+      if(width*height>20000000)throw new Error('PNG画像が大きすぎます');
+      const serialized=new XMLSerializer().serializeToString(svg);
+      const image=new Image();
+      const url=URL.createObjectURL(new Blob([serialized],{type:'image/svg+xml'}));
+      try{
+        await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('PNG変換に失敗しました'));image.src=url});
+        const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+        const context=canvas.getContext('2d');
+        if(!context)throw new Error('PNG変換に失敗しました');
+        context.fillStyle='#fff';context.fillRect(0,0,width,height);
+        context.drawImage(image,0,0,width,height);
+        return canvas.toDataURL('image/png');
+      }finally{URL.revokeObjectURL(url)}
+    }
+    function showCopyMenu(x,y){
+      menu.style.left=Math.max(0,Math.min(x,innerWidth-190))+'px';
+      menu.style.top=Math.max(0,Math.min(y,innerHeight-116))+'px';
+      menu.style.display='block';
+    }
+    document.addEventListener('contextmenu',(event)=>{
+      if(!diagram.contains(event.target))return;
+      event.preventDefault();
+      parent.postMessage({type:'markink-render-select',focus:false},'*');
+      showCopyMenu(event.clientX,event.clientY);
+    },true);
+    diagram.addEventListener('click',()=>parent.postMessage({type:'markink-render-select'},'*'));
+    document.addEventListener('click',(event)=>{if(!menu.contains(event.target))menu.style.display='none'});
+    menu.addEventListener('click',async(event)=>{
+      const format=event.target?.dataset?.format;
+      if(!format)return;
+      menu.style.display='none';error.textContent='';
+      try{
+        const value=format==='text'?window.markinkCodeBlockSource:format==='png'?await pngData():officeDrawing();
+        const targetFormat=format==='powerpoint'?'office-drawing':format;
+        if(value.length>16*1024*1024)throw new Error('コピーする図が大きすぎます');
+        parent.postMessage({type:'markink-render-copy',format:targetFormat,value},'*');
+      }catch(cause){error.textContent=String(cause&&cause.message||cause);reportHeight()}
+    });
+    window.addEventListener('message',(event)=>{
+      if(event.data?.type!=='markink-render-copy-result')return;
+      error.textContent=event.data.error||'';reportHeight();
+    });
     const library=${library};
     const url=URL.createObjectURL(new Blob([library],{type:'text/javascript'}));
     const script=document.createElement('script');script.src=url;

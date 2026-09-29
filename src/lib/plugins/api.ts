@@ -14,7 +14,9 @@ export type PluginPermission =
   | 'settings.write'
   | 'network.request'
   | 'secrets.use'
-  | 'package.read';
+  | 'package.read'
+  | 'clipboard.write'
+  | 'office.copy';
 
 export interface DocumentSnapshot {
   title: string;

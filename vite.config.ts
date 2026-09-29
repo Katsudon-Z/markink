@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'node:path';
 
 export default defineConfig({
   clearScreen: false,
@@ -9,5 +10,6 @@ export default defineConfig({
   },
   build: {
     target: ['es2021', 'chrome100', 'safari13'],
+    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), pluginEditor: resolve(__dirname, 'plugin-editor.html') } },
   },
 });

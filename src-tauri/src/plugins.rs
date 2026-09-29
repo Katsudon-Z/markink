@@ -226,6 +226,8 @@ const PERMISSIONS: &[&str] = &[
     "network.request",
     "secrets.use",
     "package.read",
+    "clipboard.write",
+    "office.copy",
 ];
 
 fn plugins_root() -> PathBuf {

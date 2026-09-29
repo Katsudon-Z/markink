@@ -7,6 +7,7 @@ mod fsutil;
 mod legacy_migration;
 mod logging;
 mod plugin_secrets;
+mod office_copy;
 mod plugin_state;
 mod plugins;
 mod settings;
@@ -95,7 +96,9 @@ pub fn run() {
             plugins::plugin_rollback_update,
             plugin_state::plugin_enabled_ids,
             plugin_state::plugin_set_enabled,
-            logging::plugin_log
+            logging::plugin_log,
+            office_copy::copy_office_drawing,
+            office_copy::copy_clipboard_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

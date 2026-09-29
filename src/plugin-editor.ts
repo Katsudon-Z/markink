@@ -1,0 +1,29 @@
+import { emitTo, listen } from '@tauri-apps/api/event';
+import './plugin-editor.css';
+
+const token = new URLSearchParams(location.search).get('token');
+const frame = document.getElementById('plugin-editor-frame') as HTMLIFrameElement;
+const cancel = document.getElementById('editor-cancel') as HTMLButtonElement;
+const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' blob:; img-src data: blob:; connect-src 'none'; form-action 'none'">`;
+let submitted = false;
+
+async function submit(value: string | null) {
+  if (submitted || !token) return;
+  submitted = true;
+  await emitTo('main', 'plugin-editor-result', { token, value });
+}
+
+cancel.addEventListener('click', () => { void submit(null); });
+window.addEventListener('message', (event) => {
+  if (event.source !== frame.contentWindow) return;
+  if (event.data?.type !== 'markink-editor-result' || typeof event.data.value !== 'string') return;
+  if (new TextEncoder().encode(event.data.value).byteLength > 2 * 1024 * 1024) return;
+  void submit(event.data.value);
+});
+
+if (token) {
+  void listen<{ token: string; html: string }>('plugin-editor-content', (event) => {
+    if (event.payload?.token !== token || typeof event.payload.html !== 'string') return;
+    frame.srcdoc = csp + event.payload.html;
+  }).then(() => emitTo('main', 'plugin-editor-ready', { token }));
+}

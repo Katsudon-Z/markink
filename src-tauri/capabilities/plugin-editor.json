@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "plugin-editor",
+  "description": "Editor window event bridge",
+  "windows": ["plugin-editor"],
+  "permissions": ["core:event:default", "core:window:allow-close"]
+}

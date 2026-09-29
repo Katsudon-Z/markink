@@ -85,13 +85,15 @@ entry は 8 MiB 以下の UTF-8 JavaScript です。entry は単一スクリプ�
 | `ui.notify` | `notify(message)` | 通知を表示。最大 4096 文字。 |
 | `ui.dialog` | `prompt(label, initialValue?)` | 文字列を入力。キャンセル時は `null`。 |
 | `ui.dialog` | `showResult(title, text, canReplace)` | 結果を表示。`insert`、`replace`、`cancel` を返す。 |
-| `ui.dialog` | `openEditor(title, html)` | プラグイン提供の HTML を sandbox 付き iframe で表示。`parent.postMessage({ type: 'markink-editor-result', value: string }, '*')` で結果を返す。キャンセル時は `null`。 |
+| `ui.dialog` | `openEditor(title, html)` | サイズ変更・移動できる別ウィンドウの sandbox 付き iframe で HTML を表示。`parent.postMessage({ type: 'markink-editor-result', value: string }, '*')` で結果を返す。キャンセル時は `null`。 |
 | `log.write` | `log({ level, message, fields? })` | 本体のログ設定に従いプラグインログを出力。 |
 | `settings.read` | `getSetting(key)` | プラグイン固有の文字列設定を取得。未設定時は `null`。 |
 | `settings.write` | `setSetting(key, value)` | プラグイン固有の文字列設定を保存。16 KiB まで。秘密値には使わない。 |
 | `network.request` | `requestJson(url, body, useApiKey?, timeoutSecs?)` | 許可 origin へ JSON POST。`{ status, body }` を返す。 |
 | `secrets.use` | `requestJson(..., true)` | Windows 資格情報ストア内の API キーを Bearer ヘッダーで付与。秘密値は Worker に返さない。 |
 | `package.read` | `readPackageText(path)` | 同じZIPに同梱し、`fileHashes` に記載したUTF-8ファイルを読む。1ファイル8 MiBまで。 |
+| `clipboard.write` | 描画iframeからの `markink-render-copy` | Windowsのクリップボードへ文字列またはPNGをコピーする。 |
+| `office.copy` | 描画iframeからの `markink-render-copy` | 汎用図形データをOffice用クリップボード形式へ変換する。 |
 
 プラグインログは 1 ID あたり 1 分間に 120 件までです。本文、API キー、HTTP 要求・応答をログに書かないでください。
 
@@ -103,9 +105,15 @@ entry は 8 MiB 以下の UTF-8 JavaScript です。entry は単一スクリプ�
 
 コードブロックを選択しているか、内部にカーソルがある場合、`selectedCodeBlock: { params, text, from, to }` を返します。`params` はコードフェンスの言語名など、`text` はコード本文、`from` と `to` はブロック全体のProseMirror位置です。Mermaidエディタは `params` が `mermaid` のブロックを再編集します。コードフェンスの言語名はMarkdown保存・再読込後も保持されます。
 
-`openEditor()` の HTML は 16 MiB 以下、戻り値は 2 MiB 以下です。Workerからホストへの要求全体は20 MiBまでです。iframe は `allow-scripts` のみの sandbox で動き、Tauri API やホストの DOM にはアクセスできません。HTML 内のネットワーク通信は CSP で禁止し、インラインとblobのスクリプトを許可します。プラグイン停止時はダイアログも閉じられます。`applyEdit()` のMarkdownは2 MiB、`readDocument()` のMarkdownは16 MiBまでです。
+`openEditor()` の HTML は 16 MiB 以下、戻り値は 2 MiB 以下です。Workerからホストへの要求全体は20 MiBまでです。編集画面は本体とは別のウィンドウで開き、移動・サイズ変更できます。iframe は `allow-scripts` のみの sandbox で動き、Tauri API やホストの DOM にはアクセスできません。HTML 内のネットワーク通信は CSP で禁止し、インラインとblobのスクリプトを許可します。プラグイン停止時は編集画面も閉じられます。`applyEdit()` のMarkdownは2 MiB、`readDocument()` のMarkdownは16 MiBまでです。
 
-`registerCodeBlockRenderer(language, html)` のHTMLは16 MiB以下で、iframe内の `window.markinkCodeBlockSource` にコード本文が文字列で渡されます。図を描いた後は `parent.postMessage({ type: 'markink-render-height', height: document.body.scrollHeight }, '*')` で高さを通知できます。本体は80〜4000 pxに制限します。プラグイン停止時は通常のコードブロック表示に戻ります。同じ言語の描画は一つのプラグインだけが登録できます。iframeのsandboxとCSPは `openEditor()` と同じです。
+`registerCodeBlockRenderer(language, html)` のHTMLは16 MiB以下で、iframe内の `window.markinkCodeBlockSource` にコード本文が文字列で渡されます。図を描いた後は `parent.postMessage({ type: 'markink-render-height', height: document.body.scrollHeight }, '*')` で高さを通知できます。本体は140〜4000 pxに制限します。プラグイン停止時は通常のコードブロック表示に戻ります。同じ言語の描画は一つのプラグインだけが登録できます。iframeのsandboxとCSPは `openEditor()` と同じです。
+
+描画iframeから `parent.postMessage({ type: 'markink-render-select' }, '*')` を送ると、対応するコードブロックを選択できます。右クリックメニューを開いたままにする場合は `focus: false` を加えてください。図の上下の余白をクリックするか、図を選択して上下矢印キーを押すと、前後の段落にカーソルを置けます。隣に段落がない場合は新しい段落を作成します。
+
+描画iframeの右クリックメニューなどからコピーする場合は、`parent.postMessage({ type: 'markink-render-copy', format, value }, '*')` を送ります。`format` は `text`、`png`、`office-drawing` です。`text` は文字列、`png` はPNG data URLを指定し、`clipboard.write` 権限が必要です。`office-drawing` は図形・線・文字の座標を含むJSONを指定し、`office.copy` 権限が必要です。本体はPowerPointを起動せず、Windowsクリップボードに `Art::GVML ClipFormat` を書き込みます。要求は16 MiB以下です。結果はiframeへ `markink-render-copy-result` メッセージで返ります。Officeへの貼り付けと図形の個別編集は実機で確認済みです。
+
+Office図形JSONは `{ minX, minY, width, height, shapes, lines, texts }` です。`shapes` の要素は `{ x, y, w, h, kind: 'rectangle' | 'ellipse' | 'diamond', label }`、`lines` は `{ points: [[x, y], ...], arrow }`、`texts` は `{ x, y, w, h, label }` です。座標は同一の図形座標系を使います。各`lines`要素は1つのOfficeコネクタに変換されます。ほぼ直線の経路は直線コネクタ、曲がる経路は曲線コネクタとして生成します。曲線はPowerPoint標準の形状と自動調整を使うため、Mermaid表示と異なる場合があります。MermaidプラグインのPowerPoint図コピーはフローチャートのみ対応します。
 
 Mermaidのような描画ライブラリは、ブラウザーで動く単一のJavaScriptファイルにビルドしてZIPへ同梱できます。manifestの `permissions` に `package.read` を加え、そのファイルを `fileHashes` に記載してください。Workerで `const code = await api.readPackageText('mermaid.bundle.js')` と読み、編集画面やコードブロック描画用のHTMLに渡します。画面内でコードをblob URLのスクリプトとして読み込めます。分割チャンクの動的importやCDNへのアクセスには対応しません。Mermaid原文はMarkdownのコードフェンスとして保存します。
 
