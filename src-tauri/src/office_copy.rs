@@ -23,12 +23,40 @@ struct DiagramNode {
     h: f64,
     kind: String,
     label: String,
+    #[serde(default)]
+    node_id: Option<String>,
+    #[serde(default)]
+    points: Vec<[f64; 2]>,
+    #[serde(default)]
+    fill: Option<String>,
+    #[serde(default)]
+    stroke: Option<String>,
+    #[serde(default)]
+    stroke_width: Option<f64>,
+    #[serde(default)]
+    dash: Option<String>,
+    #[serde(default)]
+    layer: Option<String>,
 }
 
 #[cfg(windows)]
 #[derive(Deserialize)]
 struct DiagramEdge {
     points: Vec<[f64; 2]>,
+    #[serde(default)]
+    start_node: Option<String>,
+    #[serde(default)]
+    end_node: Option<String>,
+    #[serde(default)]
+    stroke: Option<String>,
+    #[serde(default)]
+    stroke_width: Option<f64>,
+    #[serde(default)]
+    dash: Option<String>,
+    #[serde(default)]
+    start_arrow: Option<String>,
+    #[serde(default)]
+    end_arrow: Option<String>,
 }
 
 #[cfg(windows)]
@@ -47,7 +75,18 @@ fn valid_number(value: f64) -> bool {
 }
 
 #[cfg(windows)]
+fn valid_color(value: &Option<String>) -> bool {
+    value.as_deref().is_none_or(|color| {
+        color == "none"
+            || (color.len() == 7
+                && color.starts_with('#')
+                && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()))
+    })
+}
+
+#[cfg(windows)]
 fn validate(input: &Diagram) -> Result<(), String> {
+    let mut node_ids = std::collections::HashSet::new();
     if !valid_number(input.min_x)
         || !valid_number(input.min_y)
         || !valid_number(input.width)
@@ -62,19 +101,42 @@ fn validate(input: &Diagram) -> Result<(), String> {
         return Err("Office図形のサイズまたは要素数が不正です".into());
     }
     for node in &input.shapes {
+        if let Some(id) = &node.node_id {
+            if id.is_empty() || id.len() > 500 || !node_ids.insert(id.as_str()) {
+                return Err("Office図形のノードIDが不正です".into());
+            }
+        }
         if ![node.x, node.y, node.w, node.h].iter().all(|v| valid_number(*v))
             || node.w <= 0.0
             || node.h <= 0.0
             || node.label.chars().count() > 1000
-            || !matches!(node.kind.as_str(), "rectangle" | "ellipse" | "diamond")
+            || !matches!(node.kind.as_str(), "rectangle" | "ellipse" | "diamond" | "freeform")
+            || node.points.len() > 128
+            || (node.kind == "freeform" && node.points.len() < 3)
+            || !node.points.iter().flatten().all(|value| valid_number(*value))
+            || !valid_color(&node.fill)
+            || !valid_color(&node.stroke)
+            || node.stroke_width.is_some_and(|width| !valid_number(width) || width < 0.0 || width > 100.0)
+            || node.dash.as_deref().is_some_and(|dash| !matches!(dash, "solid" | "dash" | "dot"))
+            || node.layer.as_deref().is_some_and(|layer| !matches!(layer, "background" | "foreground"))
         {
             return Err("Office図形の形状が不正です".into());
         }
     }
     for edge in &input.lines {
+        if edge.start_node.as_ref().is_some_and(|id| !node_ids.contains(id.as_str()))
+            || edge.end_node.as_ref().is_some_and(|id| !node_ids.contains(id.as_str()))
+        {
+            return Err("Office図形の接続先が不正です".into());
+        }
         if edge.points.len() < 2
             || edge.points.len() > 25
             || !edge.points.iter().flatten().all(|v| valid_number(*v))
+            || !valid_color(&edge.stroke)
+            || edge.stroke_width.is_some_and(|width| !valid_number(width) || width < 0.0 || width > 100.0)
+            || edge.dash.as_deref().is_some_and(|dash| !matches!(dash, "solid" | "dash" | "dot"))
+            || edge.start_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond"))
+            || edge.end_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond"))
         {
             return Err("Office図形の線が不正です".into());
         }

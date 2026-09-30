@@ -1,7 +1,7 @@
 {
   "id": "markink.mermaid-editor",
   "name": "Mermaid エディタ",
-  "version": "1.1.3",
+  "version": "1.1.6",
   "apiVersion": 1,
   "description": "Mermaid図の作成・編集・表示と、Mermaid記法・PNG・PowerPoint図のコピーを行います。",
   "author": "markink",
@@ -16,9 +16,9 @@
     "office.copy"
   ],
   "fileHashes": {
-    "index.js": "7414555f8e82a506631485423838eed7288d5ec9e27e72966081ff9948761af7",
+    "index.js": "7853172e072b29cc08561373e0a8a5ed4b4a9902ada4a67af583ac7c003fe79e",
     "mermaid.bundle.js": "97b6f0b6cdbbe12266f6975aef0b73952d29e3abb43052d383f77099fac272f7",
-    "README.md": "909491a278c0569b21612d5580647b3e90c6008b66749ddbc58cbbff93cf97aa",
+    "README.md": "b7e6d91f7378445b01dfd0f482248fb4ce682fe51e111ddfe97702ff5b388121",
     "THIRD_PARTY_NOTICES.txt": "600031cd8d73a56288146babca4eac3750bc85788e8643205f621498688f566a"
   }
 }

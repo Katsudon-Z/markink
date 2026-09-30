@@ -109,36 +109,96 @@ function renderHtml(bundle) {
       const a=toPoint(svg,r.left,r.top),b=toPoint(svg,r.right,r.bottom);
       return {x:a[0],y:a[1],w:b[0]-a[0],h:b[1]-a[1]};
     };
-    function officeDrawing(){
-      const source=window.markinkCodeBlockSource.replace(/^---\\s*\\n[\\s\\S]*?\\n---\\s*\\n/,'').trimStart();
-      if(!/^(?:flowchart|graph)\\s+(?:TB|TD|BT|LR|RL)\\b/.test(source))throw new Error('PowerPoint図はフローチャートに対応しています');
+    async function officeDrawing(){
+      const diagramType=window.markinkMermaid.detectType(window.markinkCodeBlockSource);
+      if(!diagramType.startsWith('flowchart'))throw new Error('PowerPoint図はgraph/flowchart記法に対応しています');
       const svg=diagram.querySelector('svg');
       if(!svg)throw new Error('描画が完了していません');
-      const nodes=[...svg.querySelectorAll('g.node')].map((node)=>{
-        const box=bounds(svg,node),shape=node.querySelector('rect,ellipse,circle,polygon,path');
-        const tag=shape?.tagName.toLowerCase();
-        const kind=tag==='ellipse'||tag==='circle'?'ellipse':tag==='polygon'||tag==='path'?'diamond':'rectangle';
+      if(svg.querySelector('g.node image,g.node foreignObject'))throw new Error('画像を含む図はPowerPoint図形へ変換できません。PNG形式でコピーしてください');
+      const parsed=await window.markinkMermaid.mermaidAPI.getDiagramFromText(window.markinkCodeBlockSource);
+      const connections=new Map(parsed.db.getEdges().map(edge=>[edge.id,edge]));
+      const vertexIds=[...parsed.db.getVertices()].map(([id,vertex])=>({id,domId:vertex.domId}));
+      const svgMatrix=svg.getScreenCTM();
+      if(!svgMatrix)throw new Error('図の座標を取得できません');
+      const localPoint=(element,x,y)=>{
+        const matrix=element.getScreenCTM();
+        if(!matrix)throw new Error('図形の座標を取得できません');
+        const p=new DOMPoint(x,y).matrixTransform(matrix).matrixTransform(svgMatrix.inverse());
+        return [p.x,p.y];
+      };
+      const color=(value,fallback)=>{
+        if(!value||value==='none'||value==='transparent')return value==='none'||value==='transparent'?'none':fallback;
+        const probe=document.createElement('span');probe.style.color=value;document.body.append(probe);
+        const rgb=getComputedStyle(probe).color;probe.remove();
+        const parts=rgb.match(/^rgba?[(]([0-9]+)[, ]+([0-9]+)[, ]+([0-9]+)(?:[, /]+([0-9.]+))?[)]$/);
+        if(parts){
+          if(parts[4]==='0')return 'none';
+          return '#'+parts.slice(1,4).map(part=>Number(part).toString(16).padStart(2,'0')).join('').toUpperCase();
+        }
+        return /^#[0-9a-f]{6}$/i.test(value)?value.toUpperCase():fallback;
+      };
+      const style=(element)=>{
+        const css=getComputedStyle(element);
+        return {fill:color(css.fill,'#FFFFFF'),stroke:color(css.stroke,'none'),strokeWidth:Math.min(100,Math.max(0,parseFloat(css.strokeWidth)||0)),dash:css.strokeDasharray&&css.strokeDasharray!=='none'?(css.strokeDasharray.split(/[ ,]+/).filter(Boolean).length>2?'dot':'dash'):'solid'};
+      };
+      const outline=(element)=>{
+        const length=element.getTotalLength();
+        if(!Number.isFinite(length)||length<=0)return [];
+        const count=Math.max(8,Math.min(120,Math.ceil(length/8)));
+        const points=[];
+        for(let i=0;i<count;i++){
+          const p=element.getPointAtLength(length*i/count);
+          points.push(localPoint(element,p.x,p.y));
+        }
+        return points;
+      };
+      const shapes=[];
+      const addShape=(element,label,layer,nodeId)=>{
+        const tag=element.tagName.toLowerCase();
+        const box=bounds(svg,element);
+        if(!(box.w>0&&box.h>0))return;
+        const rounded=tag==='rect'&&(parseFloat(element.getAttribute('rx'))>0||parseFloat(element.getAttribute('ry'))>0);
+        const kind=tag==='ellipse'||tag==='circle'?'ellipse':tag==='rect'&&!rounded?'rectangle':'freeform';
+        const points=kind==='freeform'?outline(element):[];
+        if(kind==='freeform'&&points.length<3)return;
+        shapes.push({...box,kind,label,points,...style(element),layer,nodeId});
+      };
+      for(const cluster of svg.querySelectorAll('g.cluster')){
+        const shape=cluster.querySelector(':scope > rect,:scope > polygon,:scope > path');
+        if(shape)addShape(shape,'','background',cluster.getAttribute('data-id')||cluster.id);
+        const title=cluster.querySelector('.cluster-label');
+        if(title){const box=bounds(svg,title);if(box.w>0&&box.h>0)shapes.push({...box,kind:'rectangle',label:title.textContent.trim().slice(0,1000),fill:'none',stroke:'none',layer:'background'});}
+      }
+      for(const node of svg.querySelectorAll('g.node')){
         const label=(node.querySelector('.label')||node).textContent.trim().slice(0,1000);
-        return {...box,kind,label};
-      }).filter((node)=>node.w>0&&node.h>0);
-      if(!nodes.length||nodes.length>200)throw new Error('PowerPoint図のノード数が範囲外です');
+        const elements=[...node.querySelectorAll('rect,ellipse,circle,polygon,path')].filter(item=>!item.closest('.label'));
+        const nodeId=node.getAttribute('data-id')||vertexIds.find(vertex=>node.id===vertex.domId||node.id.endsWith('-'+vertex.domId))?.id||null;
+        elements.forEach((element,index)=>addShape(element,index===0?label:'','foreground',index===0?nodeId:null));
+      }
+      if(!shapes.length||shapes.length>200)throw new Error('PowerPoint図の図形数が範囲外です');
+      const nodeIds=new Set(shapes.map(shape=>shape.nodeId).filter(Boolean));
       const edges=[];
       for(const path of svg.querySelectorAll('.edgePath path, path.flowchart-link')){
         if(typeof path.getTotalLength!=='function')continue;
         const length=path.getTotalLength();
-        const matrix=path.getScreenCTM(),svgMatrix=svg.getScreenCTM();
-        if(!matrix||!svgMatrix||!Number.isFinite(length))continue;
+        if(!Number.isFinite(length)||length<=0)continue;
         const points=[];
         const steps=Math.max(1,Math.min(24,Math.ceil(length/40)));
         for(let i=0;i<=steps;i++){
-          const p=path.getPointAtLength(length*i/steps).matrixTransform(matrix).matrixTransform(svgMatrix.inverse());
-          points.push([p.x,p.y]);
+          const p=path.getPointAtLength(length*i/steps);
+          points.push(localPoint(path,p.x,p.y));
         }
-        edges.push({points,arrow:Boolean(path.getAttribute('marker-end'))});
+        const css=getComputedStyle(path);
+        const marker=(side)=>path.getAttribute('marker-'+side)||css.getPropertyValue('marker-'+side)||'';
+        const arrow=(value)=>!value||value==='none'?'none':/circle/i.test(value)?'oval':/diamond/i.test(value)?'diamond':'triangle';
+        const appearance=style(path);
+        const connection=connections.get(path.getAttribute('data-id'))||[...connections].find(([id])=>path.id.endsWith('-'+id))?.[1];
+        edges.push({points,stroke:appearance.stroke,strokeWidth:appearance.strokeWidth,dash:appearance.dash,startArrow:arrow(marker('start')),endArrow:arrow(marker('end')),startNode:nodeIds.has(connection?.start)?connection.start:null,endNode:nodeIds.has(connection?.end)?connection.end:null});
       }
+      if(connections.size&&edges.length&&!edges.some(edge=>edge.startNode||edge.endNode))throw new Error('Mermaidの接続情報を図形に対応付けられません');
       const labels=[...svg.querySelectorAll('.edgeLabel')].map((item)=>({...bounds(svg,item),label:item.textContent.trim().slice(0,1000)})).filter((item)=>item.label&&item.w>0);
       const viewBox=svg.viewBox.baseVal;
-      return JSON.stringify({minX:viewBox.x,minY:viewBox.y,width:viewBox.width||svg.getBoundingClientRect().width,height:viewBox.height||svg.getBoundingClientRect().height,shapes:nodes,lines:edges,texts:labels});
+      return JSON.stringify({minX:viewBox.x,minY:viewBox.y,width:viewBox.width||svg.getBoundingClientRect().width,height:viewBox.height||svg.getBoundingClientRect().height,shapes,lines:edges,texts:labels});
     }
     async function pngData(){
       const svg=diagram.querySelector('svg');
@@ -176,7 +236,7 @@ function renderHtml(bundle) {
       if(!format)return;
       menu.style.display='none';error.textContent='';
       try{
-        const value=format==='text'?window.markinkCodeBlockSource:format==='png'?await pngData():officeDrawing();
+        const value=format==='text'?window.markinkCodeBlockSource:format==='png'?await pngData():await officeDrawing();
         const targetFormat=format==='powerpoint'?'office-drawing':format;
         if(value.length>16*1024*1024)throw new Error('コピーする図が大きすぎます');
         parent.postMessage({type:'markink-render-copy',format:targetFormat,value},'*');
