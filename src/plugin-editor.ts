@@ -1,4 +1,5 @@
 import { emitTo, listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import './plugin-editor.css';
 
 const token = new URLSearchParams(location.search).get('token');
@@ -10,7 +11,17 @@ let submitted = false;
 async function submit(value: string | null) {
   if (submitted || !token) return;
   submitted = true;
-  await emitTo('main', 'plugin-editor-result', { token, value });
+  try {
+    try {
+      await emitTo('main', 'plugin-editor-result', { token, value });
+    } catch (error) {
+      if (value !== null) throw error;
+    }
+    await getCurrentWindow().close();
+  } catch (error) {
+    submitted = false;
+    console.error('編集ウィンドウを終了できません', error);
+  }
 }
 
 cancel.addEventListener('click', () => { void submit(null); });

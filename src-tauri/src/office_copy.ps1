@@ -14,7 +14,7 @@ function Box($x, $y, $w, $h) {
     return '<a:xfrm><a:off x="' + $left + '" y="' + $top + '"/><a:ext cx="' + $width + '" cy="' + $height + '"/></a:xfrm>'
 }
 function TextBody($value) {
-    return '<a:txSp><a:txBody><a:bodyPr wrap="square" anchor="ctr"/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="ja-JP" sz="1100"><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill></a:rPr><a:t>' + (E $value) + '</a:t></a:r><a:endParaRPr lang="ja-JP"/></a:p></a:txBody><a:useSpRect/></a:txSp>'
+    return '<a:txSp><a:txBody><a:bodyPr wrap="square" anchor="ctr" lIns="0" rIns="0" tIns="0" bIns="0"><a:normAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="ja-JP" sz="1100"><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill></a:rPr><a:t>' + (E $value) + '</a:t></a:r><a:endParaRPr lang="ja-JP"/></a:p></a:txBody><a:useSpRect/></a:txSp>'
 }
 function ShapeStyle {
     return '<a:style><a:lnRef idx="1"><a:schemeClr val="dk1"/></a:lnRef><a:fillRef idx="1"><a:schemeClr val="lt1"/></a:fillRef><a:effectRef idx="0"><a:schemeClr val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="dk1"/></a:fontRef></a:style>'
@@ -36,7 +36,7 @@ function LineStyle($color, $width, $dash, $startArrow, $endArrow) {
     return $result + '</a:ln>'
 }
 function ShapeXml($shape, $shapeId) {
-    $kind = switch ($shape.kind) { 'ellipse' { 'ellipse' } 'diamond' { 'diamond' } default { 'rect' } }
+    $kind = switch ($shape.kind) { 'ellipse' { 'ellipse' } 'diamond' { 'diamond' } 'roundRect' { 'roundRect' } 'flowChartPredefinedProcess' { 'flowChartPredefinedProcess' } 'can' { 'can' } default { 'rect' } }
     if ($shape.kind -eq 'freeform') {
         $path = '<a:path w="' + (U $shape.w) + '" h="' + (U $shape.h) + '"><a:moveTo><a:pt x="' + (U ([double]$shape.points[0][0] - [double]$shape.x)) + '" y="' + (U ([double]$shape.points[0][1] - [double]$shape.y)) + '"/></a:moveTo>'
         for ($pointIndex = 1; $pointIndex -lt $shape.points.Count; $pointIndex++) {
@@ -44,12 +44,35 @@ function ShapeXml($shape, $shapeId) {
             $path += '<a:lnTo><a:pt x="' + (U ([double]$point[0] - [double]$shape.x)) + '" y="' + (U ([double]$point[1] - [double]$shape.y)) + '"/></a:lnTo>'
         }
         $path += '<a:close/></a:path>'
-        $halfW = U ([double]$shape.w / 2)
-        $halfH = U ([double]$shape.h / 2)
         $fullW = U $shape.w
         $fullH = U $shape.h
-        $sites = '<a:cxnLst><a:cxn ang="16200000"><a:pos x="' + $halfW + '" y="0"/></a:cxn><a:cxn ang="10800000"><a:pos x="0" y="' + $halfH + '"/></a:cxn><a:cxn ang="5400000"><a:pos x="' + $halfW + '" y="' + $fullH + '"/></a:cxn><a:cxn ang="0"><a:pos x="' + $fullW + '" y="' + $halfH + '"/></a:cxn></a:cxnLst>'
-        $geometry = '<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/>' + $sites + '<a:rect l="0" t="0" r="' + $fullW + '" b="' + $fullH + '"/><a:pathLst>' + $path + '</a:pathLst></a:custGeom>'
+        if ($shape.connectionSites -and $shape.connectionSites.Count -gt 0) {
+            $siteCoordinates = $shape.connectionSites
+        } else {
+            $shapeX = [double]$shape.x
+            $shapeY = [double]$shape.y
+            $centerX = $shapeX + [double]$shape.w / 2.0
+            $centerY = $shapeY + [double]$shape.h / 2.0
+            $right = $shapeX + [double]$shape.w
+            $bottom = $shapeY + [double]$shape.h
+            $siteCoordinates = @(@($centerX, $shapeY), @($shapeX, $centerY), @($centerX, $bottom), @($right, $centerY))
+        }
+        $guides = '<a:gdLst>'
+        $sites = '<a:cxnLst>'
+        for ($siteIndex = 0; $siteIndex -lt $siteCoordinates.Count; $siteIndex++) {
+            $site = $siteCoordinates[$siteIndex]
+            $siteX = [double]$site[0] - [double]$shape.x
+            $siteY = [double]$site[1] - [double]$shape.y
+            $xName = 'csX' + $siteIndex
+            $yName = 'csY' + $siteIndex
+            $guides += '<a:gd name="' + $xName + '" fmla="*/ ' + (U $siteX) + ' w ' + $fullW + '"/><a:gd name="' + $yName + '" fmla="*/ ' + (U $siteY) + ' h ' + $fullH + '"/>'
+            $angle = [long][Math]::Round([Math]::Atan2(($siteY - [double]$shape.h / 2.0), ($siteX - [double]$shape.w / 2.0)) * 10800000.0 / [Math]::PI)
+            if ($angle -lt 0) { $angle += 21600000 }
+            $sites += '<a:cxn ang="' + $angle.ToString($culture) + '"><a:pos x="' + $xName + '" y="' + $yName + '"/></a:cxn>'
+        }
+        $guides += '</a:gdLst>'
+        $sites += '</a:cxnLst>'
+        $geometry = '<a:custGeom><a:avLst/>' + $guides + '<a:ahLst/>' + $sites + '<a:rect l="l" t="t" r="r" b="b"/><a:pathLst>' + $path + '</a:pathLst></a:custGeom>'
     } else {
         $geometry = '<a:prstGeom prst="' + $kind + '"><a:avLst/></a:prstGeom>'
     }
@@ -139,14 +162,39 @@ foreach ($line in $drawing.lines) {
     $connections = ''
     if ($line.startNode) {
         $target = $nodeShapes[[string]$line.startNode]
-        $connections += '<a:stCxn id="' + $target.Id + '" idx="' + (SiteIndex $target.Shape $start) + '"/>'
+        $site = if ($null -ne $line.startSite) { [int]$line.startSite } else { SiteIndex $target.Shape $start }
+        $connections += '<a:stCxn id="' + $target.Id + '" idx="' + $site + '"/>'
     }
     if ($line.endNode) {
         $target = $nodeShapes[[string]$line.endNode]
-        $connections += '<a:endCxn id="' + $target.Id + '" idx="' + (SiteIndex $target.Shape $end) + '"/>'
+        $site = if ($null -ne $line.endSite) { [int]$line.endSite } else { SiteIndex $target.Shape $end }
+        $connections += '<a:endCxn id="' + $target.Id + '" idx="' + $site + '"/>'
     }
-    [void]$xml.Append('<a:cxnSp><a:nvCxnSpPr><a:cNvPr id="' + $id + '" name="Connector ' + $id + '"/><a:cNvCxnSpPr>' + $connections + '</a:cNvCxnSpPr></a:nvCxnSpPr><a:spPr>' + $box + '<a:prstGeom prst="' + $preset + '"><a:avLst/></a:prstGeom>' + (LineStyle $line.stroke $line.strokeWidth $line.dash $startArrow $endArrow) + '</a:spPr>' + (ConnectorStyle) + '</a:cxnSp>')
+    $officeStartArrow = if ($startArrow -eq 'cross') { 'none' } else { $startArrow }
+    $officeEndArrow = if ($endArrow -eq 'cross') { 'none' } else { $endArrow }
+    [void]$xml.Append('<a:cxnSp><a:nvCxnSpPr><a:cNvPr id="' + $id + '" name="Connector ' + $id + '"/><a:cNvCxnSpPr>' + $connections + '</a:cNvCxnSpPr></a:nvCxnSpPr><a:spPr>' + $box + '<a:prstGeom prst="' + $preset + '"><a:avLst/></a:prstGeom>' + (LineStyle $line.stroke $line.strokeWidth $line.dash $officeStartArrow $officeEndArrow) + '</a:spPr>' + (ConnectorStyle) + '</a:cxnSp>')
     $id++
+    $crosses = @()
+    if ($startArrow -eq 'cross') { $crosses += @{ Point = $start; Node = $line.startNode; Sites = $line.startCrossSites } }
+    if ($endArrow -eq 'cross') { $crosses += @{ Point = $end; Node = $line.endNode; Sites = $line.endCrossSites } }
+    foreach ($cross in $crosses) {
+        $half = 4.0
+        $crossX = [double]$cross.Point[0] - $half
+        $crossY = [double]$cross.Point[1] - $half
+        for ($diagonal = 0; $diagonal -lt 2; $diagonal++) {
+            $crossBox = Box $crossX $crossY (2.0 * $half) (2.0 * $half)
+            if ($diagonal -eq 1) { $crossBox = $crossBox.Replace('<a:xfrm>', '<a:xfrm flipV="1">') }
+            $crossConnections = ''
+            if ($cross.Node -and $cross.Sites) {
+                $target = $nodeShapes[[string]$cross.Node]
+                $first = [int]$cross.Sites[$diagonal * 2]
+                $second = [int]$cross.Sites[$diagonal * 2 + 1]
+                $crossConnections = '<a:stCxn id="' + $target.Id + '" idx="' + $first + '"/><a:endCxn id="' + $target.Id + '" idx="' + $second + '"/>'
+            }
+            [void]$xml.Append('<a:cxnSp><a:nvCxnSpPr><a:cNvPr id="' + $id + '" name="Cross ' + $id + '"/><a:cNvCxnSpPr>' + $crossConnections + '</a:cNvCxnSpPr></a:nvCxnSpPr><a:spPr>' + $crossBox + '<a:prstGeom prst="straightConnector1"><a:avLst/></a:prstGeom>' + (LineStyle $line.stroke $line.strokeWidth 'solid' 'none' 'none') + '</a:spPr>' + (ConnectorStyle) + '</a:cxnSp>')
+            $id++
+        }
+    }
 }
 foreach ($label in $drawing.texts) {
     [void]$xml.Append('<a:sp><a:nvSpPr><a:cNvPr id="' + $id + '" name="Text ' + $id + '"/><a:cNvSpPr txBox="1"/></a:nvSpPr><a:spPr>' + (Box $label.x $label.y $label.w $label.h) + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></a:spPr>' + (TextBody $label.label) + (ShapeStyle) + '</a:sp>')

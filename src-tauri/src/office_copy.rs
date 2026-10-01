@@ -28,6 +28,8 @@ struct DiagramNode {
     #[serde(default)]
     points: Vec<[f64; 2]>,
     #[serde(default)]
+    connection_sites: Vec<[f64; 2]>,
+    #[serde(default)]
     fill: Option<String>,
     #[serde(default)]
     stroke: Option<String>,
@@ -47,6 +49,14 @@ struct DiagramEdge {
     start_node: Option<String>,
     #[serde(default)]
     end_node: Option<String>,
+    #[serde(default)]
+    start_site: Option<usize>,
+    #[serde(default)]
+    end_site: Option<usize>,
+    #[serde(default)]
+    start_cross_sites: Option<[usize; 4]>,
+    #[serde(default)]
+    end_cross_sites: Option<[usize; 4]>,
     #[serde(default)]
     stroke: Option<String>,
     #[serde(default)]
@@ -86,7 +96,7 @@ fn valid_color(value: &Option<String>) -> bool {
 
 #[cfg(windows)]
 fn validate(input: &Diagram) -> Result<(), String> {
-    let mut node_ids = std::collections::HashSet::new();
+    let mut node_ids = std::collections::HashMap::new();
     if !valid_number(input.min_x)
         || !valid_number(input.min_y)
         || !valid_number(input.width)
@@ -102,7 +112,8 @@ fn validate(input: &Diagram) -> Result<(), String> {
     }
     for node in &input.shapes {
         if let Some(id) = &node.node_id {
-            if id.is_empty() || id.len() > 500 || !node_ids.insert(id.as_str()) {
+            let site_count = if node.connection_sites.is_empty() { 4 } else { node.connection_sites.len() };
+            if id.is_empty() || id.len() > 500 || node_ids.insert(id.as_str(), site_count).is_some() {
                 return Err("Office図形のノードIDが不正です".into());
             }
         }
@@ -110,10 +121,13 @@ fn validate(input: &Diagram) -> Result<(), String> {
             || node.w <= 0.0
             || node.h <= 0.0
             || node.label.chars().count() > 1000
-            || !matches!(node.kind.as_str(), "rectangle" | "ellipse" | "diamond" | "freeform")
+            || !matches!(node.kind.as_str(), "rectangle" | "ellipse" | "diamond" | "freeform" | "roundRect" | "flowChartPredefinedProcess" | "can")
             || node.points.len() > 128
             || (node.kind == "freeform" && node.points.len() < 3)
             || !node.points.iter().flatten().all(|value| valid_number(*value))
+            || node.connection_sites.len() > 1024
+            || (!node.connection_sites.is_empty() && node.kind != "freeform")
+            || !node.connection_sites.iter().flatten().all(|value| valid_number(*value))
             || !valid_color(&node.fill)
             || !valid_color(&node.stroke)
             || node.stroke_width.is_some_and(|width| !valid_number(width) || width < 0.0 || width > 100.0)
@@ -124,8 +138,12 @@ fn validate(input: &Diagram) -> Result<(), String> {
         }
     }
     for edge in &input.lines {
-        if edge.start_node.as_ref().is_some_and(|id| !node_ids.contains(id.as_str()))
-            || edge.end_node.as_ref().is_some_and(|id| !node_ids.contains(id.as_str()))
+        if edge.start_node.as_ref().is_some_and(|id| !node_ids.contains_key(id.as_str()))
+            || edge.end_node.as_ref().is_some_and(|id| !node_ids.contains_key(id.as_str()))
+            || edge.start_site.is_some_and(|site| edge.start_node.as_ref().and_then(|id| node_ids.get(id.as_str())).is_none_or(|count| site >= *count))
+            || edge.end_site.is_some_and(|site| edge.end_node.as_ref().and_then(|id| node_ids.get(id.as_str())).is_none_or(|count| site >= *count))
+            || edge.start_cross_sites.is_some_and(|sites| edge.start_node.as_ref().and_then(|id| node_ids.get(id.as_str())).is_none_or(|count| sites.iter().any(|site| site >= count)))
+            || edge.end_cross_sites.is_some_and(|sites| edge.end_node.as_ref().and_then(|id| node_ids.get(id.as_str())).is_none_or(|count| sites.iter().any(|site| site >= count)))
         {
             return Err("Office図形の接続先が不正です".into());
         }
@@ -135,8 +153,8 @@ fn validate(input: &Diagram) -> Result<(), String> {
             || !valid_color(&edge.stroke)
             || edge.stroke_width.is_some_and(|width| !valid_number(width) || width < 0.0 || width > 100.0)
             || edge.dash.as_deref().is_some_and(|dash| !matches!(dash, "solid" | "dash" | "dot"))
-            || edge.start_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond"))
-            || edge.end_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond"))
+            || edge.start_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond" | "cross"))
+            || edge.end_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond" | "cross"))
         {
             return Err("Office図形の線が不正です".into());
         }

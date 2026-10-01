@@ -50,7 +50,7 @@ await writeFile(resolve(pluginDir, 'THIRD_PARTY_NOTICES.txt'), `${notices.join('
 
 const manifestPath = resolve(pluginDir, 'manifest.json');
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-const files = ['index.js', 'mermaid.bundle.js', 'README.md', 'THIRD_PARTY_NOTICES.txt'];
+const files = ['index.js', 'office-drawing.js', 'mermaid.bundle.js', 'README.md', 'THIRD_PARTY_NOTICES.txt'];
 manifest.fileHashes = Object.fromEntries(await Promise.all(files.map(async (name) => [
   name,
   createHash('sha256').update(await readFile(resolve(pluginDir, name))).digest('hex')

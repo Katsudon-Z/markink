@@ -15,6 +15,7 @@ mod startup;
 
 use collab_host::{collab_probe_signal, collab_release_signal, collab_resolve_signal};
 use document::CurrentDocument;
+use tauri::Manager;
 
 #[tauri::command]
 fn collab_relay_stats(room: String) -> Option<collab_relay::RelayStats> {
@@ -28,6 +29,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                for (label, editor) in window.app_handle().webview_windows() {
+                    if label != "main" {
+                        let _ = editor.destroy();
+                    }
+                }
+            }
+        })
         .setup(|_app| {
             plugins::recover_interrupted_updates();
             if let Err(error) = legacy_migration::run() {
