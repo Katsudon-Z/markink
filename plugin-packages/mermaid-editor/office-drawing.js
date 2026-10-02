@@ -12,13 +12,20 @@
     };
     window.markinkOfficeDrawing=async function officeDrawing(source,diagram){
       const diagramType=window.markinkMermaid.detectType(source);
-      if(!diagramType.startsWith('flowchart'))throw new Error('PowerPoint図はgraph/flowchart記法に対応しています');
       const svg=diagram.querySelector('svg');
       if(!svg)throw new Error('描画が完了していません');
+      if(diagramType==='sequence')return window.markinkSequenceOfficeDrawing(source,svg);
+      if(diagramType==='stateDiagram'||diagramType==='state')return window.markinkStateOfficeDrawing(source,svg);
+      if(!diagramType.startsWith('flowchart'))throw new Error('PowerPoint図はgraph/flowchart・sequenceDiagram・stateDiagram記法に対応しています');
       if(svg.querySelector('g.node image,g.node foreignObject'))throw new Error('画像を含む図はPowerPoint図形へ変換できません。PNG形式でコピーしてください');
       const parsed=await window.markinkMermaid.mermaidAPI.getDiagramFromText(source);
       const connections=new Map(parsed.db.getEdges().map(edge=>[edge.id,edge]));
       const vertexIds=[...parsed.db.getVertices()].map(([id,vertex])=>({id,domId:vertex.domId,type:vertex.icon?'icon':vertex.img?'image':vertex.type,text:vertex.text}));
+      return window.markinkGraphOfficeDrawing(svg,{connections,vertexIds});
+    };
+    // Shared SVG geometry and connection-site conversion for graph-based diagrams.
+    window.markinkGraphOfficeDrawing=async function(svg,{connections,vertexIds,state=false}){
+      if(svg.querySelector('g.node image,g.node foreignObject'))throw new Error('画像・HTMLラベルを含む図はPNG形式でコピーしてください');
       const svgMatrix=svg.getScreenCTM();
       if(!svgMatrix)throw new Error('図の座標を取得できません');
       const localPoint=(element,x,y)=>{
@@ -42,6 +49,15 @@
         const css=getComputedStyle(element);
         const dashParts=(css.strokeDasharray||'').match(/[0-9]*\.?[0-9]+/g)||[];
         return {fill:color(css.fill,'#FFFFFF'),stroke:color(css.stroke,'none'),strokeWidth:Math.min(100,Math.max(0,parseFloat(css.strokeWidth)||0)),dash:dashParts.some(part=>Number(part)>0)?'dot':'solid'};
+      };
+      const textStyle=element=>{
+        const ink=[...element.querySelectorAll('tspan')].find(span=>span.textContent.trim())||element;
+        const css=getComputedStyle(ink);
+        return {fontSize:Math.min(200,Math.max(1,parseFloat(css.fontSize)||16)),textColor:color(css.fill,'#000000')};
+      };
+      const textValue=element=>{
+        const rows=[...element.querySelectorAll('tspan.text-outer')];
+        return (rows.length?rows.map(row=>row.textContent).join('\n'):element.textContent).trim().slice(0,1000);
       };
       const outline=(element)=>{
         const length=element.getTotalLength();
@@ -83,6 +99,7 @@
       const shapes=[];
       const shapeElements=new Map();
       const shapeVertices=new WeakMap();
+      const shapeOutlines=new WeakMap();
       const polygonTypes=new Set(['hex','hexagon','trap-b','trap-t','trapezoid','inv_trapezoid','lean-r','lean-l','lean_right','lean_left','odd']);
       const addShape=(element,label,layer,nodeId,semanticType)=>{
         const tag=element.tagName.toLowerCase();
@@ -91,7 +108,7 @@
         const rounded=tag==='rect'&&(parseFloat(element.getAttribute('rx'))>0||parseFloat(element.getAttribute('ry'))>0);
         const isRectangle=semanticType==='square'||semanticType==='rect'||semanticType==='squareRect'||Boolean(nodeId&&semanticType==null)||tag==='rect'&&!rounded;
         const isDiamond=['diamond','diam','decision','question'].includes(semanticType);
-        const nativeKind={round:'roundRect',subroutine:'flowChartPredefinedProcess',cylinder:'can'}[semanticType];
+        const nativeKind={round:'roundRect',subroutine:'flowChartPredefinedProcess',cylinder:'can',stateRect:'roundRect',stateStart:'ellipse',stateEnd:'ellipse'}[semanticType];
         const kind=nativeKind|| (isDiamond?'freeform':tag==='ellipse'||tag==='circle'?'ellipse':isRectangle?'rectangle':'freeform');
         const polygonPoints=tag==='polygon'?Array.from({length:element.points.numberOfItems},(_,i)=>{
           const point=element.points.getItem(i);
@@ -103,6 +120,7 @@
         if(kind==='freeform'&&points.length<3)return false;
         const shape={...box,kind,label,points,...style(element),layer,nodeId};
         shapes.push(shape);
+        if(state&&(semanticType==='stateStart'||semanticType==='stateEnd'))shapeOutlines.set(shape,Array.from({length:64},(_,i)=>[box.x+box.w/2+box.w/2*Math.cos(i*Math.PI/32),box.y+box.h/2+box.h/2*Math.sin(i*Math.PI/32)]));
         if(isDiamond||isAsymmetric)shapeVertices.set(shape,points);
         else if(isRectangle)shapeVertices.set(shape,rectangleVertices(box));
         else if(polygonPoints)shapeVertices.set(shape,polygonPoints);
@@ -114,7 +132,18 @@
         if(nodeId)shapeElements.set(nodeId,element);
         return true;
       };
-      for(const cluster of svg.querySelectorAll('g.cluster')){
+      for(const cluster of svg.querySelectorAll(state?'g.cluster,g.statediagram-cluster':'g.cluster')){
+        if(state){
+          const vertex=vertexIds.find(item=>cluster.id===item.domId||cluster.getAttribute('data-id')===item.id);
+          if(vertex?.shape==='noteGroup')continue;
+          const elements=[...cluster.querySelectorAll('rect,polygon,path')].filter(item=>item.closest('g.cluster,g.statediagram-cluster')===cluster&&!item.closest('.cluster-label,g.node'));
+          elements.sort((a,b)=>Number(b.classList.contains('outer'))-Number(a.classList.contains('outer')));
+          let primary=false;
+          for(const element of elements){
+            if(addShape(element,'','background',!primary?vertex?.id||cluster.getAttribute('data-id')||cluster.id:null,'square'))primary=true;
+          }
+          continue;
+        }
         const shape=cluster.querySelector(':scope > rect,:scope > polygon,:scope > path');
         if(shape)addShape(shape,'','background',cluster.getAttribute('data-id')||cluster.id,null);
         const title=cluster.querySelector('.cluster-label');
@@ -123,14 +152,39 @@
       for(const node of svg.querySelectorAll('g.node')){
         const elements=[...node.querySelectorAll('rect,ellipse,circle,polygon,path')].filter(item=>!item.closest('.label'));
         const vertex=vertexIds.find(item=>node.id===item.domId||node.id.endsWith('-'+item.domId));
-        const domLabel=(node.querySelector('.label')||node).textContent.trim();
-        const label=(domLabel||String(vertex?.text||'')).trim().slice(0,1000);
+        const labelElement=node.querySelector('.label');
+        const domLabel=state&&labelElement?textValue(labelElement):(labelElement||node).textContent.trim();
+        const label=(state&&!labelElement?'':state&&Array.isArray(vertex?.text)?vertex.text.join('\n'):domLabel||String(vertex?.text||'')).trim().slice(0,1000);
         const nodeId=node.getAttribute('data-id')||vertex?.id||null;
+        if(state&&vertex?.shape==='stateEnd'){
+          // Mermaid's rough renderer emits multiple paths for each circle. Keep two circles.
+          const sorted=elements.filter(element=>{const b=bounds(svg,element);return b.w>0&&b.h>0}).sort((a,b)=>bounds(svg,b).w-bounds(svg,a).w);
+          if(sorted.length){
+            addShape(sorted[0],'','foreground',nodeId,'stateEnd');
+            const outer=shapes[shapes.length-1];outer.kind='bullseye';outer.fill=outer.stroke;
+            const border=sorted.find(element=>bounds(svg,element).w>=outer.w*0.8&&style(element).stroke!=='none');
+            if(border){const ink=style(border);outer.stroke=ink.stroke;outer.strokeWidth=ink.strokeWidth;}
+            const inner=sorted.find(element=>bounds(svg,element).w<outer.w*0.8);
+            if(inner){const ink=style(inner);outer.fill=ink.fill!=='none'?ink.fill:ink.stroke;}
+          }
+          continue;
+        }
         let primaryAdded=false;
         for(const element of elements){
           const primary=!primaryAdded;
-          if(addShape(element,primary?label:'','foreground',primary?nodeId:null,primary?vertex?.type:null)){
+          const separateLabel=state&&vertex?.shape==='rectWithTitle';
+          if(addShape(element,primary&&!separateLabel?label:'','foreground',primary?nodeId:null,primary?vertex?.type:null)){
             primaryAdded=true;
+            if(state&&primary&&labelElement&&!separateLabel)Object.assign(shapes[shapes.length-1],textStyle(labelElement.querySelector('text')||labelElement));
+            if(state&&['rect','choice','fork','join','note','stateStart'].includes(vertex?.shape)){
+              const shape=shapes[shapes.length-1];
+              for(const detail of elements){
+                const appearance=style(detail);
+                if(shape.fill==='none'&&appearance.fill!=='none')shape.fill=appearance.fill;
+                if(shape.stroke==='none'&&appearance.stroke!=='none'){shape.stroke=appearance.stroke;shape.strokeWidth=appearance.strokeWidth;shape.dash=appearance.dash;}
+              }
+              break;
+            }
             if(vertex?.type==='stadium'||vertex?.type==='odd'){
               const shape=shapes[shapes.length-1];
               for(const detail of elements){
@@ -151,7 +205,7 @@
       if(!shapes.length||shapes.length>200)throw new Error('PowerPoint図の図形数が範囲外です');
       const nodeIds=new Set(shapes.map(shape=>shape.nodeId).filter(Boolean));
       const edges=[];
-      for(const path of svg.querySelectorAll('.edgePath path, path.flowchart-link')){
+      for(const path of svg.querySelectorAll('.edgePath path, path.flowchart-link, path.transition, path[data-et="edge"]')){
         if(typeof path.getTotalLength!=='function')continue;
         const length=path.getTotalLength();
         if(!Number.isFinite(length)||length<=0)continue;
@@ -163,7 +217,7 @@
         }
         const css=getComputedStyle(path);
         const marker=(side)=>path.getAttribute('marker-'+side)||css.getPropertyValue('marker-'+side)||'';
-        const arrow=(value)=>!value||value==='none'?'none':/cross/i.test(value)?'cross':/circle/i.test(value)?'oval':/diamond/i.test(value)?'diamond':'triangle';
+        const arrow=(value)=>!value||value==='none'?'none':/cross/i.test(value)?'cross':/circle/i.test(value)?'oval':/diamond/i.test(value)?'diamond':/barb/i.test(value)?'arrow':'triangle';
         const appearance=style(path);
         const connection=connections.get(path.getAttribute('data-id'))||[...connections].find(([id])=>path.id.endsWith('-'+id))?.[1];
         edges.push({points,stroke:appearance.stroke,strokeWidth:appearance.strokeWidth,dash:appearance.dash,startArrow:arrow(marker('start')),endArrow:arrow(marker('end')),startNode:nodeIds.has(connection?.start)?connection.start:null,endNode:nodeIds.has(connection?.end)?connection.end:null});
@@ -204,16 +258,16 @@
         const attached=ports.get(shape.nodeId);
         if(!attached?.length)continue;
         const preset=attached.map(port=>nearestPreset(shape,port.point));
-        if(['roundRect','flowChartPredefinedProcess','can'].includes(shape.kind)&&!attached.some(port=>port.edge[port.side+'Arrow']==='cross')){
+        if(!state&&['roundRect','flowChartPredefinedProcess','can'].includes(shape.kind)&&!attached.some(port=>port.edge[port.side+'Arrow']==='cross')){
           attached.forEach((port,i)=>{port.edge[port.side+'Site']=preset[i].index});
           continue;
         }
-        const needsCustom=attached.some(port=>port.edge[port.side+'Arrow']==='cross')||preset.some(site=>site.distance>2.25)||attached.some((port,i)=>attached.slice(0,i).some((other,j)=>preset[i].index===preset[j].index&&Math.hypot(port.point[0]-other.point[0],port.point[1]-other.point[1])>1.5));
+        const needsCustom=shapeOutlines.has(shape)||attached.some(port=>port.edge[port.side+'Arrow']==='cross')||preset.some(site=>site.distance>2.25)||attached.some((port,i)=>attached.slice(0,i).some((other,j)=>preset[i].index===preset[j].index&&Math.hypot(port.point[0]-other.point[0],port.point[1]-other.point[1])>1.5));
         if(!needsCustom){attached.forEach((port,i)=>{port.edge[port.side+'Site']=preset[i].index});continue}
         if(shape.kind!=='freeform'){
-          shape.points=shapeVertices.get(shape)||outline(shapeElements.get(shape.nodeId));
+          shape.points=shapeOutlines.get(shape)||shapeVertices.get(shape)||outline(shapeElements.get(shape.nodeId));
           if(shape.points.length<3)throw new Error('図形の接続点を作成できません');
-          shape.kind='freeform';
+          if(shape.kind!=='bullseye')shape.kind='freeform';
         }
         shape.connectionSites=[];
         attached.forEach(port=>{
@@ -224,7 +278,7 @@
         });
       }
       for(const shape of shapes){
-        if(shape.kind!=='freeform')continue;
+        if(shape.kind!=='freeform'&&shape.kind!=='bullseye')continue;
         const {x,y,w,h}=shape;
         const standard=[[x+w/2,y],[x,y+h/2],[x+w/2,y+h],[x+w,y+h/2]];
         const vertices=shapeVertices.get(shape)||[];
@@ -251,8 +305,23 @@
       }
       const labels=[...svg.querySelectorAll('.edgeLabel')].map((item)=>{
         const box=bounds(svg,item);
-        return {x:box.x-5,y:box.y-3,w:box.w+10,h:box.h+6,label:item.textContent.trim().slice(0,1000)};
+        return {x:box.x-5,y:box.y-3,w:box.w+10,h:box.h+6,label:state?textValue(item):item.textContent.trim().slice(0,1000),...(state?textStyle(item.querySelector('text')||item):{})};
       }).filter((item)=>item.label&&item.w>0);
+      if(state){
+        for(const text of svg.querySelectorAll('.cluster-label text,.statediagramTitleText,g.node text')){
+          const node=text.closest('g.node');
+          const vertex=node&&vertexIds.find(item=>node.id===item.domId||node.getAttribute('data-id')===item.id);
+          if(node&&vertex?.shape!=='rectWithTitle')continue;
+          const b=bounds(svg,text),label=textValue(text);
+          if(label&&b.w>0&&b.h>0)labels.push({x:b.x-5,y:b.y-3,w:b.w+10,h:b.h+6,label,...textStyle(text)});
+        }
+        for(const line of svg.querySelectorAll('g.node line.divider')){
+          const a=localPoint(line,Number(line.getAttribute('x1')),Number(line.getAttribute('y1')));
+          const b=localPoint(line,Number(line.getAttribute('x2')),Number(line.getAttribute('y2')));
+          edges.push({points:[a,b],...style(line),startArrow:'none',endArrow:'none'});
+        }
+      }
+      if(edges.length>400||labels.length>400)throw new Error('PowerPoint図の要素数が範囲外です');
       const viewBox=svg.viewBox.baseVal;
       return JSON.stringify({minX:viewBox.x,minY:viewBox.y,width:viewBox.width||svg.getBoundingClientRect().width,height:viewBox.height||svg.getBoundingClientRect().height,shapes,lines:edges,texts:labels});
     };

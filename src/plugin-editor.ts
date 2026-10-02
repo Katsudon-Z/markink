@@ -27,12 +27,22 @@ async function submit(value: string | null) {
 cancel.addEventListener('click', () => { void submit(null); });
 window.addEventListener('message', (event) => {
   if (event.source !== frame.contentWindow) return;
-  if (event.data?.type !== 'markink-editor-result' || typeof event.data.value !== 'string') return;
+  if (!['markink-editor-result', 'markink-editor-apply'].includes(event.data?.type) || typeof event.data.value !== 'string') return;
   if (new TextEncoder().encode(event.data.value).byteLength > 2 * 1024 * 1024) return;
+  if (event.data.type === 'markink-editor-apply') {
+    if (token) void emitTo('main', 'plugin-editor-apply', { token, value: event.data.value }).catch((error) => {
+      frame.contentWindow?.postMessage({ type: 'markink-editor-apply-result', error: String(error) }, '*');
+    });
+    return;
+  }
   void submit(event.data.value);
 });
 
 if (token) {
+  void listen<{ token: string; error: string | null }>('plugin-editor-apply-result', (event) => {
+    if (event.payload?.token !== token) return;
+    frame.contentWindow?.postMessage({ type: 'markink-editor-apply-result', error: event.payload.error }, '*');
+  });
   void listen<{ token: string; html: string }>('plugin-editor-content', (event) => {
     if (event.payload?.token !== token || typeof event.payload.html !== 'string') return;
     frame.srcdoc = csp + event.payload.html;

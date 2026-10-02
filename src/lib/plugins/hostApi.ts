@@ -26,7 +26,7 @@ export interface PluginHostApiOptions {
   requestJson: (pluginId: PluginId, url: string, body: string, useApiKey: boolean, timeoutSecs: number) => Promise<NetworkResponse>;
   prompt: (pluginId: PluginId, label: string, initialValue: string) => Promise<string | null>;
   showResult: (pluginId: PluginId, title: string, text: string, canReplace: boolean) => Promise<'insert' | 'replace' | 'cancel'>;
-  openEditor: (pluginId: PluginId, title: string, html: string) => Promise<string | null>;
+  openEditor: (pluginId: PluginId, title: string, html: string, onApply?: (value: string) => Promise<void>) => Promise<string | null>;
   readPackageText: (pluginId: PluginId, path: string) => Promise<string>;
   cancelDialogs?: (pluginId: PluginId) => void;
 }
@@ -147,12 +147,12 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
       }
       return options.showResult(options.pluginId, title, content, canReplace);
     },
-    openEditor: async (title: string, html: string) => {
+    openEditor: async (title: string, html: string, onApply?: (value: string) => Promise<void>) => {
       requirePermission('ui.dialog');
       if (!title.trim() || title.length > 120 || new TextEncoder().encode(html).byteLength > 16 * 1024 * 1024) {
         throw new Error('編集画面の内容が不正です。');
       }
-      return options.openEditor(options.pluginId, title, html);
+      return options.openEditor(options.pluginId, title, html, onApply);
     },
     readPackageText: async (path: string) => {
       requirePermission('package.read');

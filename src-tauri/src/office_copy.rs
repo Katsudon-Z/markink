@@ -16,6 +16,7 @@ struct Diagram {
 
 #[cfg(windows)]
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DiagramNode {
     x: f64,
     y: f64,
@@ -23,6 +24,18 @@ struct DiagramNode {
     h: f64,
     kind: String,
     label: String,
+    #[serde(default)]
+    path_closed: Option<bool>,
+    #[serde(default)]
+    start_arrow: Option<String>,
+    #[serde(default)]
+    end_arrow: Option<String>,
+    #[serde(default)]
+    font_size: Option<f64>,
+    #[serde(default)]
+    text_color: Option<String>,
+    #[serde(default)]
+    fill_opacity: Option<f64>,
     #[serde(default)]
     node_id: Option<String>,
     #[serde(default)]
@@ -43,6 +56,7 @@ struct DiagramNode {
 
 #[cfg(windows)]
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DiagramEdge {
     points: Vec<[f64; 2]>,
     #[serde(default)]
@@ -71,12 +85,17 @@ struct DiagramEdge {
 
 #[cfg(windows)]
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DiagramLabel {
     x: f64,
     y: f64,
     w: f64,
     h: f64,
     label: String,
+    #[serde(default)]
+    font_size: Option<f64>,
+    #[serde(default)]
+    text_color: Option<String>,
 }
 
 #[cfg(windows)]
@@ -121,15 +140,20 @@ fn validate(input: &Diagram) -> Result<(), String> {
             || node.w <= 0.0
             || node.h <= 0.0
             || node.label.chars().count() > 1000
-            || !matches!(node.kind.as_str(), "rectangle" | "ellipse" | "diamond" | "freeform" | "roundRect" | "flowChartPredefinedProcess" | "can")
+            || !matches!(node.kind.as_str(), "rectangle" | "ellipse" | "bullseye" | "diamond" | "freeform" | "roundRect" | "flowChartPredefinedProcess" | "can")
             || node.points.len() > 128
-            || (node.kind == "freeform" && node.points.len() < 3)
+            || (node.kind == "freeform" && node.points.len() < if node.path_closed == Some(false) { 2 } else { 3 })
             || !node.points.iter().flatten().all(|value| valid_number(*value))
             || node.connection_sites.len() > 1024
-            || (!node.connection_sites.is_empty() && node.kind != "freeform")
+            || (!node.connection_sites.is_empty() && !matches!(node.kind.as_str(), "freeform" | "bullseye"))
             || !node.connection_sites.iter().flatten().all(|value| valid_number(*value))
             || !valid_color(&node.fill)
             || !valid_color(&node.stroke)
+            || !valid_color(&node.text_color)
+            || node.font_size.is_some_and(|size| !size.is_finite() || !(1.0..=200.0).contains(&size))
+            || node.fill_opacity.is_some_and(|opacity| !opacity.is_finite() || !(0.0..=1.0).contains(&opacity))
+            || node.start_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond" | "arrow"))
+            || node.end_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond" | "arrow"))
             || node.stroke_width.is_some_and(|width| !valid_number(width) || width < 0.0 || width > 100.0)
             || node.dash.as_deref().is_some_and(|dash| !matches!(dash, "solid" | "dash" | "dot"))
             || node.layer.as_deref().is_some_and(|layer| !matches!(layer, "background" | "foreground"))
@@ -153,8 +177,8 @@ fn validate(input: &Diagram) -> Result<(), String> {
             || !valid_color(&edge.stroke)
             || edge.stroke_width.is_some_and(|width| !valid_number(width) || width < 0.0 || width > 100.0)
             || edge.dash.as_deref().is_some_and(|dash| !matches!(dash, "solid" | "dash" | "dot"))
-            || edge.start_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond" | "cross"))
-            || edge.end_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond" | "cross"))
+            || edge.start_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond" | "cross" | "arrow"))
+            || edge.end_arrow.as_deref().is_some_and(|arrow| !matches!(arrow, "none" | "triangle" | "oval" | "diamond" | "cross" | "arrow"))
         {
             return Err("Office図形の線が不正です".into());
         }
@@ -162,6 +186,8 @@ fn validate(input: &Diagram) -> Result<(), String> {
     for label in &input.texts {
         if ![label.x, label.y, label.w, label.h].iter().all(|v| valid_number(*v))
             || label.label.chars().count() > 1000
+            || !valid_color(&label.text_color)
+            || label.font_size.is_some_and(|size| !size.is_finite() || !(1.0..=200.0).contains(&size))
         {
             return Err("Office図形の文字が不正です".into());
         }

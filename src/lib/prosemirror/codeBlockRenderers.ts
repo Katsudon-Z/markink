@@ -68,6 +68,17 @@ export function codeBlockNodeView(node: ProseMirrorNode, view: EditorView, getPo
       }
       return;
     }
+    if (event.data?.type === 'markink-render-command') {
+      const renderer = renderers.get(String(current.attrs.params ?? '').trim().toLowerCase());
+      const commandId = event.data.commandId;
+      const pos = getPos();
+      if (!renderer || pos === undefined || typeof commandId !== 'string' || !/^[a-z][a-z0-9._-]{0,63}$/.test(commandId)) return;
+      view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+      dom.dispatchEvent(new CustomEvent('markink-render-command', {
+        bubbles: true, detail: { pluginId: renderer.pluginId, commandId }
+      }));
+      return;
+    }
     if (event.data?.type !== 'markink-render-copy') return;
     const renderer = renderers.get(String(current.attrs.params ?? '').trim().toLowerCase());
     const data = event.data as { format?: unknown; value?: unknown };

@@ -107,7 +107,7 @@ export interface PluginHostApi {
   /** Reads a UTF-8 resource declared in this plugin's fileHashes. */
   readPackageText(path: string): Promise<string>;
   /** Opens plugin-provided HTML in an isolated iframe. The iframe posts a string result to its parent. */
-  openEditor(title: string, html: string): Promise<string | null>;
+  openEditor(title: string, html: string, onApply?: (value: string) => Promise<void>): Promise<string | null>;
   /** Host lifecycle hook; unregisters all UI and event registrations owned by this plugin. */
   dispose(): Promise<void>;
 }

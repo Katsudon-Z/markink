@@ -45,6 +45,7 @@ function editorHtml(source, bundle) {
     let renderTimer;
     let rendering = false;
     let requested = false;
+    let applying = false;
     let serial = 0;
     function schedule(){save.disabled=true;requested=true;clearTimeout(renderTimer);renderTimer=setTimeout(renderDiagram,350)}
     async function renderDiagram(){
@@ -57,7 +58,7 @@ function editorHtml(source, bundle) {
         const result=await window.markinkMermaid.render('markink-mermaid-preview-'+current,text);
         if(source.value.trim()!==text)return;
         lastSvg=result.svg;lastSource=text;diagram.innerHTML=result.svg;
-        status.textContent='プレビュー更新済み';save.disabled=false;
+        status.textContent='プレビュー更新済み';save.disabled=applying;
       }catch(cause){
         if(source.value.trim()!==text)return;
         lastSvg='';save.disabled=true;diagram.replaceChildren();
@@ -67,8 +68,16 @@ function editorHtml(source, bundle) {
     }
     source.addEventListener('input',schedule);
     save.addEventListener('click',()=>{
-      if(!lastSvg || lastSource!==source.value.trim())return;
-      parent.postMessage({type:'markink-editor-result',value:lastSource},'*');
+      if(applying || !lastSvg || lastSource!==source.value.trim())return;
+      applying=true;save.disabled=true;status.textContent='文書に反映中…';
+      parent.postMessage({type:'markink-editor-apply',value:lastSource},'*');
+    });
+    window.addEventListener('message',(event)=>{
+      if(event.source!==parent || event.data?.type!=='markink-editor-apply-result')return;
+      applying=false;
+      status.textContent=event.data.error?'反映できませんでした':'文書に反映しました';
+      error.textContent=event.data.error||'';error.style.display=event.data.error?'block':'none';
+      save.disabled=rendering || !lastSvg || lastSource!==source.value.trim();
     });
     const library=${library};
     const url=URL.createObjectURL(new Blob([library],{type:'text/javascript'}));
@@ -76,7 +85,7 @@ function editorHtml(source, bundle) {
     script.onload=()=>{
       URL.revokeObjectURL(url);
       if(!window.markinkMermaid){status.textContent='Mermaidを初期化できません';return}
-      window.markinkMermaid.initialize({startOnLoad:false,securityLevel:'strict',htmlLabels:false,theme:'default',suppressErrorRendering:true,maxTextSize:${MAX_SOURCE}});
+      window.markinkMermaid.initialize({startOnLoad:false,securityLevel:'strict',htmlLabels:false,state:{defaultRenderer:'dagre-wrapper'},theme:'default',suppressErrorRendering:true,maxTextSize:${MAX_SOURCE}});
       schedule();
     };
     script.onerror=()=>{URL.revokeObjectURL(url);status.textContent='Mermaidを読み込めません'};
@@ -93,7 +102,7 @@ function renderHtml(bundle, officeDrawingSource) {
     #copy-menu{display:none;position:fixed;z-index:10;min-width:180px;padding:4px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 4px 16px #0003}
     #copy-menu button{display:block;width:100%;border:0;background:none;text-align:left;padding:8px;cursor:pointer;font:13px Meiryo,sans-serif}
     #copy-menu button:hover{background:#e8f0ff}
-  </style><div id="diagram"></div><div id="error"></div><div id="copy-menu"><button data-format="text">Mermaid記法</button><button data-format="powerpoint">PowerPoint図</button><button data-format="png">PNG</button></div><script>
+  </style><div id="diagram"></div><div id="error"></div><div id="copy-menu"><button data-command="edit-mermaid">図を編集</button><button data-format="text">Mermaid記法</button><button data-format="powerpoint">PowerPoint図</button><button data-format="png">PNG</button></div><script>
     const diagram=document.getElementById('diagram');
     const error=document.getElementById('error');
     const menu=document.getElementById('copy-menu');
@@ -118,7 +127,7 @@ function renderHtml(bundle, officeDrawingSource) {
     }
     function showCopyMenu(x,y){
       menu.style.left=Math.max(0,Math.min(x,innerWidth-190))+'px';
-      menu.style.top=Math.max(0,Math.min(y,innerHeight-116))+'px';
+      menu.style.top=Math.max(0,Math.min(y,innerHeight-154))+'px';
       menu.style.display='block';
     }
     document.addEventListener('contextmenu',(event)=>{
@@ -130,6 +139,8 @@ function renderHtml(bundle, officeDrawingSource) {
     diagram.addEventListener('click',()=>parent.postMessage({type:'markink-render-select'},'*'));
     document.addEventListener('click',(event)=>{if(!menu.contains(event.target))menu.style.display='none'});
     menu.addEventListener('click',async(event)=>{
+      const commandId=event.target?.dataset?.command;
+      if(commandId){menu.style.display='none';parent.postMessage({type:'markink-render-command',commandId},'*');return;}
       const format=event.target?.dataset?.format;
       if(!format)return;
       menu.style.display='none';error.textContent='';
@@ -150,7 +161,7 @@ function renderHtml(bundle, officeDrawingSource) {
     script.onload=async()=>{
       URL.revokeObjectURL(url);
       try{
-        window.markinkMermaid.initialize({startOnLoad:false,securityLevel:'strict',htmlLabels:false,theme:'default',suppressErrorRendering:true,maxTextSize:${MAX_SOURCE}});
+        window.markinkMermaid.initialize({startOnLoad:false,securityLevel:'strict',htmlLabels:false,state:{defaultRenderer:'dagre-wrapper'},theme:'default',suppressErrorRendering:true,maxTextSize:${MAX_SOURCE}});
         const result=await window.markinkMermaid.render('markink-mermaid-document',window.markinkCodeBlockSource);
         diagram.innerHTML=result.svg;
       }catch(cause){error.textContent=String(cause && cause.message || cause).slice(0,2000)}
@@ -172,8 +183,9 @@ async function edit(api, existing) {
     ? isMermaid ? block.text : sourceFromImage(legacyImage.src)
     : DEFAULT_SOURCE;
   if (!browserBundle) browserBundle = await api.readPackageText('mermaid.bundle.js');
-  const result = await api.openEditor(existing ? 'Mermaid図を編集' : 'Mermaid図を作成', editorHtml(source, browserBundle));
-  if (result === null) return;
+  let target = existing ? isMermaid ? block : legacyImage : snapshot.selection;
+  let revision = snapshot.revision;
+  const apply = async (result) => {
   if (!result.trim() || result.length > MAX_SOURCE) {
     throw new Error('Mermaid記法が不正か、サイズ上限を超えています');
   }
@@ -182,17 +194,20 @@ async function edit(api, existing) {
   const fence = '`'.repeat(longest + 1);
   const markdown = `${fence}mermaid\n${result.trimEnd()}\n${fence}`;
   const current = await api.readDocument();
-  const target = existing ? isMermaid ? block : legacyImage : snapshot.selection;
-  if (!target || current.revision !== snapshot.revision) {
+  if (!target || current.revision !== revision) {
     throw new Error('編集中に文書が更新されました。再度開いてください');
   }
-  await api.applyEdit({ baseRevision: snapshot.revision, from: target.from, to: target.to, markdown });
+  const applied = await api.applyEdit({ baseRevision: revision, from: target.from, to: target.to, markdown });
+  target = { from: applied.from, to: applied.to };
+  revision = applied.revision;
+  };
+  await api.openEditor(existing ? 'Mermaid図を編集' : 'Mermaid図を作成', editorHtml(source, browserBundle), apply);
 }
 
 self.markinkPlugin = {
   async activate(api) {
     if (!browserBundle) browserBundle = await api.readPackageText('mermaid.bundle.js');
-    const officeDrawingSource = await api.readPackageText('office-drawing.js');
+    const officeDrawingSource = (await api.readPackageText('office-drawing.js')) + '\n' + (await api.readPackageText('sequence-office-drawing.js')) + '\n' + (await api.readPackageText('state-office-drawing.js'));
     await api.registerCodeBlockRenderer('mermaid', renderHtml(browserBundle, officeDrawingSource));
     await api.registerCommand({ id: 'create-mermaid', title: 'Mermaid図を作成', placement: 'menu' }, () => edit(api, false));
     await api.registerCommand({ id: 'edit-mermaid', title: 'Mermaid記法を編集', placement: 'menu', contextMenu: true }, () => edit(api, true));

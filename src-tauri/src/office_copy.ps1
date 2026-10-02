@@ -13,8 +13,13 @@ function Box($x, $y, $w, $h) {
     $height = U $h
     return '<a:xfrm><a:off x="' + $left + '" y="' + $top + '"/><a:ext cx="' + $width + '" cy="' + $height + '"/></a:xfrm>'
 }
-function TextBody($value) {
-    return '<a:txSp><a:txBody><a:bodyPr wrap="square" anchor="ctr" lIns="0" rIns="0" tIns="0" bIns="0"><a:normAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="ja-JP" sz="1100"><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill></a:rPr><a:t>' + (E $value) + '</a:t></a:r><a:endParaRPr lang="ja-JP"/></a:p></a:txBody><a:useSpRect/></a:txSp>'
+function TextBody($value, $fontSize, $textColor) {
+    $size = if ($null -ne $fontSize) { [long][Math]::Round([double]$fontSize * 75.0) } else { 1100 }
+    $paragraphs = ''
+    foreach ($row in ([string]$value -split '\r?\n')) {
+        $paragraphs += '<a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="ja-JP" sz="' + $size + '">' + (ColorFill $textColor '#0F172A') + '</a:rPr><a:t>' + (E $row) + '</a:t></a:r><a:endParaRPr lang="ja-JP" sz="' + $size + '"/></a:p>'
+    }
+    return '<a:txSp><a:txBody><a:bodyPr wrap="square" anchor="ctr" lIns="0" rIns="0" tIns="0" bIns="0"><a:normAutofit/></a:bodyPr><a:lstStyle/>' + $paragraphs + '</a:txBody><a:useSpRect/></a:txSp>'
 }
 function ShapeStyle {
     return '<a:style><a:lnRef idx="1"><a:schemeClr val="dk1"/></a:lnRef><a:fillRef idx="1"><a:schemeClr val="lt1"/></a:fillRef><a:effectRef idx="0"><a:schemeClr val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="dk1"/></a:fontRef></a:style>'
@@ -22,10 +27,11 @@ function ShapeStyle {
 function ConnectorStyle {
     return '<a:style><a:lnRef idx="1"><a:schemeClr val="accent1"/></a:lnRef><a:fillRef idx="0"><a:schemeClr val="accent1"/></a:fillRef><a:effectRef idx="0"><a:schemeClr val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="tx1"/></a:fontRef></a:style>'
 }
-function ColorFill($color, $fallback) {
+function ColorFill($color, $fallback, $opacity) {
     if (-not $color) { $color = $fallback }
     if ($color -eq 'none') { return '<a:noFill/>' }
-    return '<a:solidFill><a:srgbClr val="' + $color.TrimStart('#').ToUpperInvariant() + '"/></a:solidFill>'
+    $alpha = if ($null -ne $opacity -and [double]$opacity -lt 1.0) { '<a:alpha val="' + [long][Math]::Round([double]$opacity * 100000.0) + '"/>' } else { '' }
+    return '<a:solidFill><a:srgbClr val="' + $color.TrimStart('#').ToUpperInvariant() + '">' + $alpha + '</a:srgbClr></a:solidFill>'
 }
 function LineStyle($color, $width, $dash, $startArrow, $endArrow) {
     if ($null -eq $width) { $width = 1.333333 }
@@ -37,13 +43,20 @@ function LineStyle($color, $width, $dash, $startArrow, $endArrow) {
 }
 function ShapeXml($shape, $shapeId) {
     $kind = switch ($shape.kind) { 'ellipse' { 'ellipse' } 'diamond' { 'diamond' } 'roundRect' { 'roundRect' } 'flowChartPredefinedProcess' { 'flowChartPredefinedProcess' } 'can' { 'can' } default { 'rect' } }
-    if ($shape.kind -eq 'freeform') {
+    if ($shape.kind -eq 'freeform' -or $shape.kind -eq 'bullseye') {
+        if ($shape.kind -eq 'bullseye') {
+            # Both rings belong to one scalable shape; only the inner circle is filled.
+            $path = '<a:path w="21600" h="21600" fill="none"><a:moveTo><a:pt x="21600" y="10800"/></a:moveTo><a:arcTo wR="10800" hR="10800" stAng="0" swAng="10800000"/><a:arcTo wR="10800" hR="10800" stAng="10800000" swAng="10800000"/><a:close/></a:path>'
+            $path += '<a:path w="21600" h="21600" stroke="false"><a:moveTo><a:pt x="14657" y="10800"/></a:moveTo><a:arcTo wR="3857" hR="3857" stAng="0" swAng="10800000"/><a:arcTo wR="3857" hR="3857" stAng="10800000" swAng="10800000"/><a:close/></a:path>'
+        } else {
         $path = '<a:path w="' + (U $shape.w) + '" h="' + (U $shape.h) + '"><a:moveTo><a:pt x="' + (U ([double]$shape.points[0][0] - [double]$shape.x)) + '" y="' + (U ([double]$shape.points[0][1] - [double]$shape.y)) + '"/></a:moveTo>'
         for ($pointIndex = 1; $pointIndex -lt $shape.points.Count; $pointIndex++) {
             $point = $shape.points[$pointIndex]
             $path += '<a:lnTo><a:pt x="' + (U ([double]$point[0] - [double]$shape.x)) + '" y="' + (U ([double]$point[1] - [double]$shape.y)) + '"/></a:lnTo>'
         }
-        $path += '<a:close/></a:path>'
+        if ($shape.pathClosed -ne $false) { $path += '<a:close/>' }
+        $path += '</a:path>'
+        }
         $fullW = U $shape.w
         $fullH = U $shape.h
         if ($shape.connectionSites -and $shape.connectionSites.Count -gt 0) {
@@ -76,9 +89,9 @@ function ShapeXml($shape, $shapeId) {
     } else {
         $geometry = '<a:prstGeom prst="' + $kind + '"><a:avLst/></a:prstGeom>'
     }
-    $fill = ColorFill $shape.fill '#FFFFFF'
-    $line = LineStyle $shape.stroke $shape.strokeWidth $shape.dash 'none' 'none'
-    return '<a:sp><a:nvSpPr><a:cNvPr id="' + $shapeId + '" name="Shape ' + $shapeId + '"/><a:cNvSpPr/></a:nvSpPr><a:spPr>' + (Box $shape.x $shape.y $shape.w $shape.h) + $geometry + $fill + $line + '</a:spPr>' + (TextBody $shape.label) + (ShapeStyle) + '</a:sp>'
+    $fill = ColorFill $shape.fill '#FFFFFF' $shape.fillOpacity
+    $line = LineStyle $shape.stroke $shape.strokeWidth $shape.dash $shape.startArrow $shape.endArrow
+    return '<a:sp><a:nvSpPr><a:cNvPr id="' + $shapeId + '" name="Shape ' + $shapeId + '"/><a:cNvSpPr/></a:nvSpPr><a:spPr>' + (Box $shape.x $shape.y $shape.w $shape.h) + $geometry + $fill + $line + '</a:spPr>' + (TextBody $shape.label $shape.fontSize $shape.textColor) + (ShapeStyle) + '</a:sp>'
 }
 function SiteIndex($shape, $point) {
     $x = [double]$shape.x
@@ -197,7 +210,7 @@ foreach ($line in $drawing.lines) {
     }
 }
 foreach ($label in $drawing.texts) {
-    [void]$xml.Append('<a:sp><a:nvSpPr><a:cNvPr id="' + $id + '" name="Text ' + $id + '"/><a:cNvSpPr txBox="1"/></a:nvSpPr><a:spPr>' + (Box $label.x $label.y $label.w $label.h) + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></a:spPr>' + (TextBody $label.label) + (ShapeStyle) + '</a:sp>')
+    [void]$xml.Append('<a:sp><a:nvSpPr><a:cNvPr id="' + $id + '" name="Text ' + $id + '"/><a:cNvSpPr txBox="1"/></a:nvSpPr><a:spPr>' + (Box $label.x $label.y $label.w $label.h) + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></a:spPr>' + (TextBody $label.label $label.fontSize $label.textColor) + (ShapeStyle) + '</a:sp>')
     $id++
 }
 [void]$xml.Append('</lc:lockedCanvas></a:graphicData></a:graphic>')

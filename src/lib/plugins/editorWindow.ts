@@ -3,13 +3,14 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 const LABEL = 'plugin-editor';
 
-export function openPluginEditorWindow(title: string, html: string): {
+export function openPluginEditorWindow(title: string, html: string, onApply?: (value: string) => Promise<void>): {
   result: Promise<string | null>;
   cancel: () => void;
 } {
   const token = crypto.randomUUID();
   let window: WebviewWindow | null = null;
   let finished = false;
+  let applying = false;
   const unlisteners: UnlistenFn[] = [];
   let resolveResult!: (value: string | null) => void;
   let rejectResult!: (reason: unknown) => void;
@@ -39,6 +40,16 @@ export function openPluginEditorWindow(title: string, html: string): {
       const value = event.payload.value;
       if (value !== null && (typeof value !== 'string' || new TextEncoder().encode(value).byteLength > 2 * 1024 * 1024)) return;
       finish(value);
+    }));
+    track(await listen<{ token: string; value: string }>('plugin-editor-apply', (event) => {
+      if (event.payload?.token !== token || !onApply || applying || finished) return;
+      const value = event.payload.value;
+      if (typeof value !== 'string' || new TextEncoder().encode(value).byteLength > 2 * 1024 * 1024) return;
+      applying = true;
+      void onApply(value).then(
+        () => emitTo(LABEL, 'plugin-editor-apply-result', { token, error: null }),
+        (error) => emitTo(LABEL, 'plugin-editor-apply-result', { token, error: String(error) })
+      ).catch(() => {}).finally(() => { applying = false; });
     }));
     if (finished) return;
     window = new WebviewWindow(LABEL, {

@@ -257,9 +257,9 @@ function App() {
       setPluginResult({ title, text, canReplace, resolve: finish });
     });
   }, []);
-  const openPluginEditor = useCallback((pluginId: string, title: string, html: string) => {
+  const openPluginEditor = useCallback((pluginId: string, title: string, html: string, onApply?: (value: string) => Promise<void>) => {
     if (pluginEditorRef.current || pluginResultPending.current) return Promise.reject(new Error('別のダイアログを表示中です'));
-    const editor = openPluginEditorWindow(title, html);
+    const editor = openPluginEditorWindow(title, html, onApply);
     pluginEditorRef.current = { pluginId, cancel: editor.cancel };
     return editor.result.finally(() => { pluginEditorRef.current = null; });
   }, []);
@@ -314,6 +314,17 @@ function App() {
   const displayPluginCommands = useMemo(() => pluginCommands.map((item) => ({
     ...item, run: () => runPluginCommand(item)
   })), [pluginCommands, runPluginCommand]);
+  useEffect(() => {
+    const onRendererCommand = (event: Event) => {
+      const detail = (event as CustomEvent<{ pluginId: string; commandId: string }>).detail;
+      if (!detail) return;
+      const command = pluginCommands.find((item) => item.pluginId === detail.pluginId
+        && item.command.id === detail.commandId && item.command.contextMenu);
+      if (command) void runPluginCommand(command).catch((error) => notifyHuman(String(error)));
+    };
+    window.addEventListener('markink-render-command', onRendererCommand);
+    return () => window.removeEventListener('markink-render-command', onRendererCommand);
+  }, [pluginCommands, runPluginCommand, notifyHuman]);
   const [pluginMenu, setPluginMenu] = useState<{ x: number; y: number } | null>(null);
   const pluginMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {

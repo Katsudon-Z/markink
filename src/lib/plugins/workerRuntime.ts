@@ -13,7 +13,7 @@ function call(method, args) {
   const requestId = ++nextRequest;
   return new Promise((resolve, reject) => {
     const timeout = method === 'prompt' || method === 'showResult' || method === 'openEditor' ? 15 * 60_000 : 135000;
-    const timer = setTimeout(() => { pending.delete(requestId); reject(new Error('ホスト応答がタイムアウトしました')); }, timeout);
+    const timer = method === 'openEditor' && args?.applyId ? null : setTimeout(() => { pending.delete(requestId); reject(new Error('ホスト応答がタイムアウトしました')); }, timeout);
     pending.set(requestId, { resolve, reject, timer });
     self.postMessage({ type: 'request', requestId, method, args });
   });
@@ -29,7 +29,13 @@ const api = Object.freeze({
   requestJson: (url, body, useApiKey = false, timeoutSecs = 120) => call('requestJson', { url, body, useApiKey, timeoutSecs }),
   prompt: (label, initialValue = '') => call('prompt', { label, initialValue }),
   showResult: (title, text, canReplace = false) => call('showResult', { title, text, canReplace }),
-  openEditor: (title, html) => call('openEditor', { title, html }),
+  openEditor: async (title, html, onApply) => {
+    if (onApply !== undefined && typeof onApply !== 'function') throw new Error('反映handlerが不正です');
+    const applyId = onApply ? '@editor-' + (++nextRequest) : null;
+    if (applyId) handlers.set(applyId, onApply);
+    try { return await call('openEditor', { title, html, applyId }); }
+    finally { if (applyId) handlers.delete(applyId); }
+  },
   readPackageText: (path) => call('readPackageText', path),
   registerCommand: async (command, handler) => {
     if (typeof handler !== 'function') throw new Error('コマンドhandlerが不正です');
@@ -69,7 +75,7 @@ self.onmessage = async (event) => {
     try {
       const handler = handlers.get(message.commandId);
       if (!handler) throw new Error('コマンドが見つかりません');
-      await handler();
+      await handler(message.value);
       self.postMessage({ type: 'invokeResult', invocationId: message.invocationId, ok: true });
     } catch (error) {
       self.postMessage({ type: 'invokeResult', invocationId: message.invocationId, ok: false, error: String(error) });
@@ -94,6 +100,7 @@ interface RunningWorker {
   invocations: Map<number, PendingInvocation>;
   nextInvocation: number;
   stopping: boolean;
+  openEditors?: number;
 }
 
 function errorText(error: unknown): string {
@@ -270,11 +277,17 @@ export class WorkerRuntime implements PluginRuntime {
           break;
         }
         case 'openEditor': {
-          const args = message.args as { title?: unknown; html?: unknown } | null;
+          const args = message.args as { title?: unknown; html?: unknown; applyId?: unknown } | null;
           if (!args || typeof args.title !== 'string' || typeof args.html !== 'string') {
             throw new Error('編集画面の要求が不正です');
           }
-          value = await running.host.openEditor(args.title, args.html);
+          if (args.applyId != null && (typeof args.applyId !== 'string' || !/^@editor-[0-9]+$/.test(args.applyId))) throw new Error('反映handlerが不正です');
+          const applyId = args.applyId as string | null | undefined;
+          running.openEditors = (running.openEditors ?? 0) + 1;
+          try {
+            value = await running.host.openEditor(args.title, args.html,
+              applyId ? (source) => this.invoke(running, applyId, source) : undefined);
+          } finally { running.openEditors -= 1; }
           break;
         }
         case 'readPackageText': {
@@ -327,16 +340,22 @@ export class WorkerRuntime implements PluginRuntime {
     }
   }
 
-  private invoke(running: RunningWorker, commandId: string): Promise<void> {
+  private invoke(running: RunningWorker, commandId: string, value?: string): Promise<void> {
     if (running.stopping) return Promise.reject(new Error('プラグインは停止中です'));
     const invocationId = ++running.nextInvocation;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const expire = () => {
+        if ((running.openEditors ?? 0) > 0 && !commandId.startsWith('@editor-')) {
+          const pending = running.invocations.get(invocationId);
+          if (pending) pending.timer = setTimeout(expire, CALL_TIMEOUT_MS);
+          return;
+        }
         running.invocations.delete(invocationId);
         reject(new Error('プラグインコマンドがタイムアウトしました'));
-      }, CALL_TIMEOUT_MS);
+      };
+      const timer = setTimeout(expire, CALL_TIMEOUT_MS);
       running.invocations.set(invocationId, { resolve, reject, timer });
-      running.worker.postMessage({ type: 'invoke', invocationId, commandId });
+      running.worker.postMessage({ type: 'invoke', invocationId, commandId, value });
     });
   }
 }

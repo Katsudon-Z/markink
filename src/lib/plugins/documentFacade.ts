@@ -114,8 +114,10 @@ export class DocumentFacade {
     if (!canApply()) throw new Error('プラグインは停止しました。');
     const transaction = view.state.tr.replaceWith(proposal.from, proposal.to, fragment);
     view.dispatch(transaction);
-    const from = proposal.from;
-    const to = from + fragment.size;
+    // Block insertion may split its surrounding paragraph. Return the fitted range,
+    // including those boundaries, so a subsequent edit replaces the same content.
+    const from = transaction.mapping.map(proposal.from, -1);
+    const to = transaction.mapping.map(proposal.to, 1);
     return { from, to, revision: this.revision() };
   }
 
