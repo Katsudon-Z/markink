@@ -3,7 +3,7 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 const LABEL = 'plugin-editor';
 
-export function openPluginEditorWindow(title: string, html: string, onApply?: (value: string) => Promise<void>): {
+export function openPluginEditorWindow(title: string, html: string, onApply?: (value: string) => Promise<void>, onCopy?: (format: string, value: string) => Promise<void>): {
   result: Promise<string | null>;
   cancel: () => void;
 } {
@@ -11,6 +11,7 @@ export function openPluginEditorWindow(title: string, html: string, onApply?: (v
   let window: WebviewWindow | null = null;
   let finished = false;
   let applying = false;
+  let copying = false;
   const unlisteners: UnlistenFn[] = [];
   let resolveResult!: (value: string | null) => void;
   let rejectResult!: (reason: unknown) => void;
@@ -50,6 +51,17 @@ export function openPluginEditorWindow(title: string, html: string, onApply?: (v
         () => emitTo(LABEL, 'plugin-editor-apply-result', { token, error: null }),
         (error) => emitTo(LABEL, 'plugin-editor-apply-result', { token, error: String(error) })
       ).catch(() => {}).finally(() => { applying = false; });
+    }));
+    track(await listen<{ token: string; format: string; value: string }>('plugin-editor-copy', (event) => {
+      if (event.payload?.token !== token || !onCopy || finished || copying) return;
+      const { format, value } = event.payload;
+      if (!['text', 'png', 'office-drawing'].includes(format) || typeof value !== 'string'
+        || new TextEncoder().encode(value).byteLength > 16 * 1024 * 1024) return;
+      copying = true;
+      void onCopy(format, value).then(
+        () => emitTo(LABEL, 'plugin-editor-copy-result', { token, error: null }),
+        (error) => emitTo(LABEL, 'plugin-editor-copy-result', { token, error: String(error) })
+      ).catch(() => {}).finally(() => { copying = false; });
     }));
     if (finished) return;
     window = new WebviewWindow(LABEL, {

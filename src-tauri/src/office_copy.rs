@@ -39,6 +39,10 @@ struct DiagramNode {
     #[serde(default)]
     node_id: Option<String>,
     #[serde(default)]
+    group_id: Option<String>,
+    #[serde(default)]
+    rotation: Option<f64>,
+    #[serde(default)]
     points: Vec<[f64; 2]>,
     #[serde(default)]
     connection_sites: Vec<[f64; 2]>,
@@ -140,6 +144,8 @@ fn validate(input: &Diagram) -> Result<(), String> {
             || node.w <= 0.0
             || node.h <= 0.0
             || node.label.chars().count() > 1000
+            || node.group_id.as_ref().is_some_and(|id| id.is_empty() || id.len() > 500)
+            || node.rotation.is_some_and(|angle| !angle.is_finite() || angle.abs() > 360.0)
             || !matches!(node.kind.as_str(), "rectangle" | "ellipse" | "bullseye" | "diamond" | "freeform" | "roundRect" | "flowChartPredefinedProcess" | "can")
             || node.points.len() > 128
             || (node.kind == "freeform" && node.points.len() < if node.path_closed == Some(false) { 2 } else { 3 })

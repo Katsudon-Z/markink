@@ -6,12 +6,13 @@ $drawing = $reader.ReadToEnd() | ConvertFrom-Json
 $culture = [Globalization.CultureInfo]::InvariantCulture
 function E($value) { return [Security.SecurityElement]::Escape([string]$value) }
 function U($value) { return ([long][Math]::Round(([double]$value) * 9525)).ToString($culture) }
-function Box($x, $y, $w, $h) {
+function Box($x, $y, $w, $h, $rotation) {
     $left = U ([double]$x - [double]$drawing.minX)
     $top = U ([double]$y - [double]$drawing.minY)
     $width = U $w
     $height = U $h
-    return '<a:xfrm><a:off x="' + $left + '" y="' + $top + '"/><a:ext cx="' + $width + '" cy="' + $height + '"/></a:xfrm>'
+    $rotate = if ($null -ne $rotation) { ' rot="' + ([long][Math]::Round([double]$rotation * 60000)).ToString($culture) + '"' } else { '' }
+    return '<a:xfrm' + $rotate + '><a:off x="' + $left + '" y="' + $top + '"/><a:ext cx="' + $width + '" cy="' + $height + '"/></a:xfrm>'
 }
 function TextBody($value, $fontSize, $textColor) {
     $size = if ($null -ne $fontSize) { [long][Math]::Round([double]$fontSize * 75.0) } else { 1100 }
@@ -91,7 +92,7 @@ function ShapeXml($shape, $shapeId) {
     }
     $fill = ColorFill $shape.fill '#FFFFFF' $shape.fillOpacity
     $line = LineStyle $shape.stroke $shape.strokeWidth $shape.dash $shape.startArrow $shape.endArrow
-    return '<a:sp><a:nvSpPr><a:cNvPr id="' + $shapeId + '" name="Shape ' + $shapeId + '"/><a:cNvSpPr/></a:nvSpPr><a:spPr>' + (Box $shape.x $shape.y $shape.w $shape.h) + $geometry + $fill + $line + '</a:spPr>' + (TextBody $shape.label $shape.fontSize $shape.textColor) + (ShapeStyle) + '</a:sp>'
+    return '<a:sp><a:nvSpPr><a:cNvPr id="' + $shapeId + '" name="Shape ' + $shapeId + '"/><a:cNvSpPr/></a:nvSpPr><a:spPr>' + (Box $shape.x $shape.y $shape.w $shape.h $shape.rotation) + $geometry + $fill + $line + '</a:spPr>' + (TextBody $shape.label $shape.fontSize $shape.textColor) + (ShapeStyle) + '</a:sp>'
 }
 function SiteIndex($shape, $point) {
     $x = [double]$shape.x
@@ -125,15 +126,39 @@ for ($index = 0; $index -lt $drawing.shapes.Count; $index++) {
 }
 for ($index = 0; $index -lt $drawing.shapes.Count; $index++) {
     $shape = $drawing.shapes[$index]
-    if ($shape.layer -ne 'background') { continue }
+    if ($shape.groupId -or $shape.layer -ne 'background') { continue }
     [void]$xml.Append((ShapeXml $shape $shapeIds[$index]))
 }
 for ($index = 0; $index -lt $drawing.shapes.Count; $index++) {
     $shape = $drawing.shapes[$index]
-    if ($shape.layer -eq 'background') { continue }
+    if ($shape.groupId -or $shape.layer -eq 'background') { continue }
     [void]$xml.Append((ShapeXml $shape $shapeIds[$index]))
 }
 $id = $drawing.shapes.Count + 2
+$groups = [ordered]@{}
+for ($index = 0; $index -lt $drawing.shapes.Count; $index++) {
+    $shape = $drawing.shapes[$index]
+    if (-not $shape.groupId) { continue }
+    $key = [string]$shape.groupId
+    if (-not $groups.Contains($key)) { $groups[$key] = [Collections.Generic.List[int]]::new() }
+    $groups[$key].Add($index)
+}
+foreach ($key in $groups.Keys) {
+    $left = [double]::PositiveInfinity; $top = [double]::PositiveInfinity
+    $right = [double]::NegativeInfinity; $bottom = [double]::NegativeInfinity
+    foreach ($index in $groups[$key]) {
+        $shape = $drawing.shapes[$index]
+        $left = [Math]::Min($left, [double]$shape.x); $top = [Math]::Min($top, [double]$shape.y)
+        $right = [Math]::Max($right, ([double]$shape.x + [double]$shape.w))
+        $bottom = [Math]::Max($bottom, ([double]$shape.y + [double]$shape.h))
+    }
+    $groupX = U ($left - [double]$drawing.minX); $groupY = U ($top - [double]$drawing.minY)
+    $groupW = U ($right - $left); $groupH = U ($bottom - $top)
+    [void]$xml.Append('<a:grpSp><a:nvGrpSpPr><a:cNvPr id="' + $id + '" name="' + (E $key) + '"/><a:cNvGrpSpPr/></a:nvGrpSpPr><a:grpSpPr><a:xfrm><a:off x="' + $groupX + '" y="' + $groupY + '"/><a:ext cx="' + $groupW + '" cy="' + $groupH + '"/><a:chOff x="' + $groupX + '" y="' + $groupY + '"/><a:chExt cx="' + $groupW + '" cy="' + $groupH + '"/></a:xfrm></a:grpSpPr>')
+    foreach ($index in $groups[$key]) { [void]$xml.Append((ShapeXml $drawing.shapes[$index] $shapeIds[$index])) }
+    [void]$xml.Append('</a:grpSp>')
+    $id++
+}
 foreach ($line in $drawing.lines) {
     $start = $line.points[0]
     $end = $line.points[$line.points.Count - 1]

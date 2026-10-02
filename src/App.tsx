@@ -257,9 +257,9 @@ function App() {
       setPluginResult({ title, text, canReplace, resolve: finish });
     });
   }, []);
-  const openPluginEditor = useCallback((pluginId: string, title: string, html: string, onApply?: (value: string) => Promise<void>) => {
+  const openPluginEditor = useCallback((pluginId: string, title: string, html: string, onApply?: (value: string) => Promise<void>, onCopy?: (format: string, value: string) => Promise<void>) => {
     if (pluginEditorRef.current || pluginResultPending.current) return Promise.reject(new Error('別のダイアログを表示中です'));
-    const editor = openPluginEditorWindow(title, html, onApply);
+    const editor = openPluginEditorWindow(title, html, onApply, onCopy);
     pluginEditorRef.current = { pluginId, cancel: editor.cancel };
     return editor.result.finally(() => { pluginEditorRef.current = null; });
   }, []);

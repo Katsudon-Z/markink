@@ -107,7 +107,7 @@ entry は 8 MiB 以下の UTF-8 JavaScript です。entry は単一スクリプ�
 
 `openEditor()` の HTML は 16 MiB 以下、戻り値は 2 MiB 以下です。Workerからホストへの要求全体は20 MiBまでです。編集画面は本体とは別のウィンドウで開き、移動・サイズ変更できます。iframe は `allow-scripts` のみの sandbox で動き、Tauri API やホストの DOM にはアクセスできません。HTML 内のネットワーク通信は CSP で禁止し、インラインとblobのスクリプトを許可します。プラグイン停止時は編集画面も閉じられます。`applyEdit()` のMarkdownは2 MiB、`readDocument()` のMarkdownは16 MiBまでです。
 
-`registerCodeBlockRenderer(language, html)` のHTMLは16 MiB以下で、iframe内の `window.markinkCodeBlockSource` にコード本文が文字列で渡されます。図を描いた後は `parent.postMessage({ type: 'markink-render-height', height: document.body.scrollHeight }, '*')` で高さを通知できます。本体は140〜4000 pxに制限します。プラグイン停止時は通常のコードブロック表示に戻ります。同じ言語の描画は一つのプラグインだけが登録できます。iframeのsandboxとCSPは `openEditor()` と同じです。
+`registerCodeBlockRenderer(language, html)` のHTMLは16 MiB以下で、iframe内の `window.markinkCodeBlockSource` にコード本文が文字列で渡されます。図を描いた後は `parent.postMessage({ type: 'markink-render-height', height: document.body.scrollHeight }, '*')` で高さを通知できます。本体は140〜65536 pxに制限します。プラグイン停止時は通常のコードブロック表示に戻ります。同じ言語の描画は一つのプラグインだけが登録できます。iframeのsandboxとCSPは `openEditor()` と同じです。
 
 描画iframeから `parent.postMessage({ type: 'markink-render-select' }, '*')` を送ると、対応するコードブロックを選択できます。右クリックメニューを開いたままにする場合は `focus: false` を加えてください。図の上下の余白をクリックするか、図を選択して上下矢印キーを押すと、前後の段落にカーソルを置けます。隣に段落がない場合は新しい段落を作成します。
 
@@ -152,3 +152,7 @@ ZIP は 50 MiB、展開合計は 100 MiB、ファイル数は 256 件までで�
 描画iframeから parent.postMessage({ type: 'markink-render-command', commandId: 'コマンドID' }, '*') を送ると、対象コードブロックを選択して、描画プラグイン自身がcontextMenu:trueで登録したコマンドを実行します。他プラグインのコマンドは実行できません。
 
 継続編集は openEditor(title, html, onApply) で開きます。onApply(value) は文書への反映処理を行う非同期コールバックです。iframeが parent.postMessage({ type: 'markink-editor-apply', value }, '*') を送ると、ウィンドウを閉じずにonApplyを呼びます。結果はiframeへ { type: 'markink-editor-apply-result', error: null | string } で返ります。反映データは2 MiB以下です。反映中はボタンを無効化してください。閉じる操作ではopenEditorのPromiseがnullで完了し、それまでに反映済みの編集は残ります。従来の2引数とmarkink-editor-resultは反映して閉じる動作を維持します。
+
+Office図形shapesの要素に任意のgroupIdを指定すると、同じgroupIdの図形を1つのOfficeグループへまとめます。グループの枠はメンバーの配置から計算し、元の座標を保ちます。接続線はメンバーのnodeIdへ接続でき、グループの移動・サイズ変更に追従します。グループを解除すると部品ごとに編集できます。ネストしたgroupId階層はありません。文字を含むグループにはlabelを持つ透明rectangleを使えます。shapesのrotationは度単位で-360〜360を指定でき、文字枠や図形を回転します。
+
+編集画面のiframeからも markink-render-copy と markink-render-copy-result を利用できます。形式、16 MiB上限、clipboard.write / office.copy の権限はコードブロック描画と同じです。本体が編集ウィンドウのセッションとプラグインの有効状態を確認し、コピーします。コピー要求は結果を受け取ってから次を送信してください。

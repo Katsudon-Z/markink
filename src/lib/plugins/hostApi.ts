@@ -8,6 +8,7 @@ import type {
 } from './api';
 import type { NetworkResponse } from './api';
 import type { DocumentFacade } from './documentFacade';
+import { ipc } from '../ipc';
 
 export interface PluginHostApiOptions {
   pluginId: PluginId;
@@ -26,7 +27,7 @@ export interface PluginHostApiOptions {
   requestJson: (pluginId: PluginId, url: string, body: string, useApiKey: boolean, timeoutSecs: number) => Promise<NetworkResponse>;
   prompt: (pluginId: PluginId, label: string, initialValue: string) => Promise<string | null>;
   showResult: (pluginId: PluginId, title: string, text: string, canReplace: boolean) => Promise<'insert' | 'replace' | 'cancel'>;
-  openEditor: (pluginId: PluginId, title: string, html: string, onApply?: (value: string) => Promise<void>) => Promise<string | null>;
+  openEditor: (pluginId: PluginId, title: string, html: string, onApply?: (value: string) => Promise<void>, onCopy?: (format: string, value: string) => Promise<void>) => Promise<string | null>;
   readPackageText: (pluginId: PluginId, path: string) => Promise<string>;
   cancelDialogs?: (pluginId: PluginId) => void;
 }
@@ -152,7 +153,16 @@ export function createPluginHostApi(options: PluginHostApiOptions): PluginHostAp
       if (!title.trim() || title.length > 120 || new TextEncoder().encode(html).byteLength > 16 * 1024 * 1024) {
         throw new Error('編集画面の内容が不正です。');
       }
-      return options.openEditor(options.pluginId, title, html, onApply);
+      return options.openEditor(options.pluginId, title, html, onApply, async (format, value) => {
+        if (new TextEncoder().encode(value).byteLength > 16 * 1024 * 1024) throw new Error('コピーするデータが大きすぎます。');
+        if (format === 'office-drawing') {
+          requirePermission('office.copy');
+          await ipc.copyOfficeDrawing(value);
+        } else if (format === 'text' || format === 'png') {
+          requirePermission('clipboard.write');
+          await ipc.copyClipboardData(format, format === 'png' ? value.replace(/^data:image\/png;base64,/, '') : value);
+        } else throw new Error('コピー形式が不正です。');
+      });
     },
     readPackageText: async (path: string) => {
       requirePermission('package.read');

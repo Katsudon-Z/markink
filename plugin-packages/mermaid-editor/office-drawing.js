@@ -15,8 +15,10 @@
       const svg=diagram.querySelector('svg');
       if(!svg)throw new Error('描画が完了していません');
       if(diagramType==='sequence')return window.markinkSequenceOfficeDrawing(source,svg);
+      if(diagramType==='pie')return window.markinkPieOfficeDrawing(source,svg);
+      if(diagramType==='architecture')return window.markinkArchitectureOfficeDrawing(source,svg);
       if(diagramType==='stateDiagram'||diagramType==='state')return window.markinkStateOfficeDrawing(source,svg);
-      if(!diagramType.startsWith('flowchart'))throw new Error('PowerPoint図はgraph/flowchart・sequenceDiagram・stateDiagram記法に対応しています');
+      if(!diagramType.startsWith('flowchart'))throw new Error('PowerPoint図はgraph/flowchart・sequenceDiagram・stateDiagram・pie・architecture-beta記法に対応しています');
       if(svg.querySelector('g.node image,g.node foreignObject'))throw new Error('画像を含む図はPowerPoint図形へ変換できません。PNG形式でコピーしてください');
       const parsed=await window.markinkMermaid.mermaidAPI.getDiagramFromText(source);
       const connections=new Map(parsed.db.getEdges().map(edge=>[edge.id,edge]));

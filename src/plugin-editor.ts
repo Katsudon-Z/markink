@@ -27,6 +27,15 @@ async function submit(value: string | null) {
 cancel.addEventListener('click', () => { void submit(null); });
 window.addEventListener('message', (event) => {
   if (event.source !== frame.contentWindow) return;
+  if (event.data?.type === 'markink-render-copy') {
+    const { format, value } = event.data;
+    if (!token || submitted || !['text', 'png', 'office-drawing'].includes(format) || typeof value !== 'string'
+      || new TextEncoder().encode(value).byteLength > 16 * 1024 * 1024) return;
+    void emitTo('main', 'plugin-editor-copy', { token, format, value }).catch((error) => {
+      frame.contentWindow?.postMessage({ type: 'markink-render-copy-result', error: String(error) }, '*');
+    });
+    return;
+  }
   if (!['markink-editor-result', 'markink-editor-apply'].includes(event.data?.type) || typeof event.data.value !== 'string') return;
   if (new TextEncoder().encode(event.data.value).byteLength > 2 * 1024 * 1024) return;
   if (event.data.type === 'markink-editor-apply') {
@@ -39,6 +48,10 @@ window.addEventListener('message', (event) => {
 });
 
 if (token) {
+  void listen<{ token: string; error: string | null }>('plugin-editor-copy-result', (event) => {
+    if (event.payload?.token !== token) return;
+    frame.contentWindow?.postMessage({ type: 'markink-render-copy-result', error: event.payload.error }, '*');
+  });
   void listen<{ token: string; error: string | null }>('plugin-editor-apply-result', (event) => {
     if (event.payload?.token !== token) return;
     frame.contentWindow?.postMessage({ type: 'markink-editor-apply-result', error: event.payload.error }, '*');

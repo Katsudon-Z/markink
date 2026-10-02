@@ -55,7 +55,7 @@ export function codeBlockNodeView(node: ProseMirrorNode, view: EditorView, getPo
     if (event.data?.type === 'markink-render-height') {
       const height = Number(event.data.height);
       if (Number.isFinite(height)) {
-        const nextHeight = `${Math.min(4000, Math.max(140, height))}px`;
+        const nextHeight = `${Math.min(65536, Math.max(140, height))}px`;
         if (frame.style.height !== nextHeight) frame.style.height = nextHeight;
       }
       return;
