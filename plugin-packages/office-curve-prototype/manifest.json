@@ -1,0 +1,16 @@
+{
+  "id": "markink.office-curve-prototype",
+  "name": "Office カスタム曲線コネクタ試作",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "index.js",
+  "permissions": [
+    "ui.register",
+    "ui.dialog",
+    "office.copy"
+  ],
+  "fileHashes": {
+    "index.js": "86e0953b008bc093be24ae23436cc1582cf117573d0d71b09330acb6ac30860a",
+    "README.md": "cd543172f6743e63becb36f2033dc27bcca2dbf12b2199100e3539852a64560c"
+  }
+}

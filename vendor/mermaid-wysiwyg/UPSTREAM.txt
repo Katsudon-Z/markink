@@ -1,0 +1,4 @@
+https://github.com/inkeep/mermaid-wysiwyg
+0d211031f47ac6b493ce091a2fd69795e3ff7a32
+MIT source snapshot: core and dom.
+Local changes: dom ViewOptions.selectionBoundary, commitActiveEdit, stale source render guard; core flowchart edits preserve the existing start arrow.

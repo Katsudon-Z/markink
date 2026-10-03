@@ -1,4 +1,31 @@
 (() => {
+  const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+  const effectiveOpacity=element=>{let value=1;for(let e=element;e&&e instanceof Element;e=e.parentElement)value*=Number(getComputedStyle(e).opacity||1);return clamp(value,0,1)};
+  const paint=value=>{
+    if(!value||value==='none'||value==='transparent')return {color:'none',alpha:0};
+    if(value.startsWith('url('))throw new Error('グラデーション・パターンの塗りはPNG形式でコピーしてください');
+    const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');canvas.width=canvas.height=1;
+    ctx.fillStyle=value;ctx.fillRect(0,0,1,1);const p=ctx.getImageData(0,0,1,1).data;
+    return {color:'#'+[...p.slice(0,3)].map(v=>v.toString(16).padStart(2,'0')).join('').toUpperCase(),alpha:p[3]/255};
+  };
+  const snapshot=css=>Object.fromEntries(Array.from(css).map(key=>[key,css.getPropertyValue(key)]));
+  const svgScale=element=>{const svg=element.ownerSVGElement,root=svg?.getScreenCTM(),local=element.getScreenCTM?.();if(!root||!local)return 1;const m=root.inverse().multiply(local);return Math.hypot(m.a,m.b)};
+  window.markinkOfficeStyle={
+    shape(element,scale=svgScale(element)){
+      const css=getComputedStyle(element),fill=paint(css.fill),stroke=paint(css.stroke),opacity=effectiveOpacity(element);
+      let dash=(css.strokeDasharray.match(/[0-9]*\.?[0-9]+/g)||[]).map(Number);
+      if(dash.length%2)dash=[...dash,...dash];
+      if(!dash.some(v=>v>0))dash=[];
+      return {computedStyle:snapshot(css),fill:fill.color,stroke:stroke.color,fillOpacity:opacity*Number(css.fillOpacity||1)*fill.alpha,strokeOpacity:opacity*Number(css.strokeOpacity||1)*stroke.alpha,
+        strokeWidth:clamp((parseFloat(css.strokeWidth)||0)*scale,0,100),dash:dash.some(v=>v>0)?'dash':'solid',dashArray:dash.map(v=>clamp(v*scale,0,10000)),lineCap:css.strokeLinecap,lineJoin:css.strokeLinejoin};
+    },
+    text(element,scale=svgScale(element)){
+      const ink=[...element.querySelectorAll('tspan')].find(e=>e.textContent.trim())||element,css=getComputedStyle(ink),color=paint(ink instanceof SVGElement?css.fill:css.color);
+      return {computedTextStyle:snapshot(css),fontSize:clamp((parseFloat(css.fontSize)||16)*scale,1,200),textColor:color.color,textOpacity:effectiveOpacity(ink)*color.alpha*(ink instanceof SVGElement?Number(css.fillOpacity||1):1),
+        fontFamily:css.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g,''),bold:css.fontWeight==='bold'||Number(css.fontWeight)>=600,italic:css.fontStyle!=='normal',underline:css.textDecorationLine.includes('underline'),strike:css.textDecorationLine.includes('line-through')};
+    }
+  };
+
     const toPoint=(svg,x,y)=>{
       const matrix=svg.getScreenCTM();
       if(!matrix)throw new Error('図の位置を取得できません');
@@ -47,16 +74,8 @@
         }
         return /^#[0-9a-f]{6}$/i.test(value)?value.toUpperCase():fallback;
       };
-      const style=(element)=>{
-        const css=getComputedStyle(element);
-        const dashParts=(css.strokeDasharray||'').match(/[0-9]*\.?[0-9]+/g)||[];
-        return {fill:color(css.fill,'#FFFFFF'),stroke:color(css.stroke,'none'),strokeWidth:Math.min(100,Math.max(0,parseFloat(css.strokeWidth)||0)),dash:dashParts.some(part=>Number(part)>0)?'dot':'solid'};
-      };
-      const textStyle=element=>{
-        const ink=[...element.querySelectorAll('tspan')].find(span=>span.textContent.trim())||element;
-        const css=getComputedStyle(ink);
-        return {fontSize:Math.min(200,Math.max(1,parseFloat(css.fontSize)||16)),textColor:color(css.fill,'#000000')};
-      };
+      const style=element=>window.markinkOfficeStyle.shape(element);
+      const textStyle=element=>window.markinkOfficeStyle.text(element);
       const textValue=element=>{
         const rows=[...element.querySelectorAll('tspan.text-outer')];
         return (rows.length?rows.map(row=>row.textContent).join('\n'):element.textContent).trim().slice(0,1000);
@@ -149,7 +168,7 @@
         const shape=cluster.querySelector(':scope > rect,:scope > polygon,:scope > path');
         if(shape)addShape(shape,'','background',cluster.getAttribute('data-id')||cluster.id,null);
         const title=cluster.querySelector('.cluster-label');
-        if(title){const box=bounds(svg,title);if(box.w>0&&box.h>0)shapes.push({...box,kind:'rectangle',label:title.textContent.trim().slice(0,1000),fill:'none',stroke:'none',layer:'background'});}
+        if(title){const box=bounds(svg,title);if(box.w>0&&box.h>0)shapes.push({...box,kind:'rectangle',label:title.textContent.trim().slice(0,1000),fill:'none',stroke:'none',layer:'background',...textStyle(title.querySelector('text')||title)});}
       }
       for(const node of svg.querySelectorAll('g.node')){
         const elements=[...node.querySelectorAll('rect,ellipse,circle,polygon,path')].filter(item=>!item.closest('.label'));
@@ -177,7 +196,7 @@
           const separateLabel=state&&vertex?.shape==='rectWithTitle';
           if(addShape(element,primary&&!separateLabel?label:'','foreground',primary?nodeId:null,primary?vertex?.type:null)){
             primaryAdded=true;
-            if(state&&primary&&labelElement&&!separateLabel)Object.assign(shapes[shapes.length-1],textStyle(labelElement.querySelector('text')||labelElement));
+            if(primary&&labelElement&&!separateLabel)Object.assign(shapes[shapes.length-1],textStyle(labelElement.querySelector('text')||labelElement));
             if(state&&['rect','choice','fork','join','note','stateStart'].includes(vertex?.shape)){
               const shape=shapes[shapes.length-1];
               for(const detail of elements){
@@ -212,7 +231,7 @@
         const length=path.getTotalLength();
         if(!Number.isFinite(length)||length<=0)continue;
         const points=[];
-        const steps=Math.max(1,Math.min(24,Math.ceil(length/40)));
+        const steps=24;
         for(let i=0;i<=steps;i++){
           const p=path.getPointAtLength(length*i/steps);
           points.push(localPoint(path,p.x,p.y));
@@ -222,7 +241,7 @@
         const arrow=(value)=>!value||value==='none'?'none':/cross/i.test(value)?'cross':/circle/i.test(value)?'oval':/diamond/i.test(value)?'diamond':/barb/i.test(value)?'arrow':'triangle';
         const appearance=style(path);
         const connection=connections.get(path.getAttribute('data-id'))||[...connections].find(([id])=>path.id.endsWith('-'+id))?.[1];
-        edges.push({points,stroke:appearance.stroke,strokeWidth:appearance.strokeWidth,dash:appearance.dash,startArrow:arrow(marker('start')),endArrow:arrow(marker('end')),startNode:nodeIds.has(connection?.start)?connection.start:null,endNode:nodeIds.has(connection?.end)?connection.end:null});
+        edges.push({points,...appearance,startArrow:arrow(marker('start')),endArrow:arrow(marker('end')),startNode:nodeIds.has(connection?.start)?connection.start:null,endNode:nodeIds.has(connection?.end)?connection.end:null});
       }
       if(connections.size&&edges.length&&!edges.some(edge=>edge.startNode||edge.endNode))throw new Error('Mermaidの接続情報を図形に対応付けられません');
       const ports=new Map();
@@ -307,7 +326,7 @@
       }
       const labels=[...svg.querySelectorAll('.edgeLabel')].map((item)=>{
         const box=bounds(svg,item);
-        return {x:box.x-5,y:box.y-3,w:box.w+10,h:box.h+6,label:state?textValue(item):item.textContent.trim().slice(0,1000),...(state?textStyle(item.querySelector('text')||item):{})};
+        return {x:box.x-5,y:box.y-3,w:box.w+10,h:box.h+6,label:state?textValue(item):item.textContent.trim().slice(0,1000),...textStyle(item.querySelector('text')||item)};
       }).filter((item)=>item.label&&item.w>0);
       if(state){
         for(const text of svg.querySelectorAll('.cluster-label text,.statediagramTitleText,g.node text')){

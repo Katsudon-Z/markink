@@ -8,6 +8,10 @@ mod legacy_migration;
 mod logging;
 mod plugin_secrets;
 mod office_copy;
+#[cfg(windows)]
+mod office_drawing;
+#[cfg(windows)]
+mod clipboard;
 mod plugin_state;
 mod plugins;
 mod settings;

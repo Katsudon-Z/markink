@@ -26,14 +26,7 @@
       if (parts[4] === '0') return 'none';
       return '#' + parts.slice(1, 4).map(p => Number(p).toString(16).padStart(2, '0')).join('').toUpperCase();
     };
-    const style = element => {
-      const css = getComputedStyle(element);
-      const alpha = Number((css.fill || '').match(/^rgba\([^)]*,\s*([0-9.]+)\)$/)?.[1] || 1);
-      return { fill: color(css.fill, 'none'), stroke: color(css.stroke, 'none'),
-        strokeWidth: Math.min(100, Math.max(0, parseFloat(css.strokeWidth) || 0)),
-        fillOpacity: Math.min(1, Math.max(0, Number(css.opacity || 1) * Number(css.fillOpacity || 1) * alpha)),
-        dash: ((css.strokeDasharray || '').match(/[0-9]*\.?[0-9]+/g) || []).some(p => Number(p) > 0) ? 'dot' : 'solid' };
-    };
+    const style = element => window.markinkOfficeStyle.shape(element);
     const visible = element => {
       const css = getComputedStyle(element);
       return !element.closest('defs,marker,clipPath,mask') && css.display !== 'none' && css.visibility !== 'hidden' && css.opacity !== '0';
@@ -97,7 +90,7 @@
       const ink = [...element.querySelectorAll('tspan')].find(span => span.textContent.trim()) || element;
       const css = getComputedStyle(ink);
       texts.push({ x: b.x - 5, y: b.y - 3, w: b.w + 10, h: b.h + 6, label,
-        fontSize: Math.min(200, Math.max(1, parseFloat(css.fontSize) || 16)), textColor: color(css.fill, '#000000') });
+        ...window.markinkOfficeStyle.text(element) });
     }
     if (!shapes.length || shapes.length > 200 || texts.length > 400) throw new Error('パイチャートの要素数が範囲外です');
     const view = svg.viewBox.baseVal;

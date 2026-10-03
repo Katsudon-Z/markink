@@ -37,7 +37,9 @@ url = "2"
 zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Security_Credentials", "Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Security_Credentials", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_WindowsAndMessaging"] }
+base64 = "=0.22.1"
+png = "=0.17.16"
 
 # 配布サイズを優先して最適化
 [profile.release]

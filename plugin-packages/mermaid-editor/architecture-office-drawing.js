@@ -26,15 +26,7 @@
       if (parts[4] === '0') return 'none';
       return '#' + parts.slice(1, 4).map(p => Number(p).toString(16).padStart(2, '0')).join('').toUpperCase();
     };
-    const style = element => {
-      const css = getComputedStyle(element);
-      const a=point(element,0,0),b=point(element,1,0);
-      const scale=Math.hypot(b[0]-a[0],b[1]-a[1]);
-      return { fill: color(css.fill, 'none'), stroke: color(css.stroke, 'none'),
-        strokeWidth: Math.min(100, Math.max(0, (parseFloat(css.strokeWidth) || 0)*scale)),
-        fillOpacity: Math.min(1, Math.max(0, Number(css.opacity || 1) * Number(css.fillOpacity || 1))),
-        dash: ((css.strokeDasharray || '').match(/[0-9]*\.?[0-9]+/g) || []).some(p => Number(p) > 0) ? 'dot' : 'solid' };
-    };
+    const style = element => window.markinkOfficeStyle.shape(element, (()=>{const a=point(element,0,0),b=point(element,1,0);return Math.hypot(b[0]-a[0],b[1]-a[1])})());
     const visible = element => {
       const css = getComputedStyle(element);
       return !element.closest('defs,marker,clipPath,mask') && css.display !== 'none' && css.visibility !== 'hidden';
@@ -81,7 +73,7 @@
       const rotation=Math.atan2(axis[1]-origin[1],axis[0]-origin[0])*180/Math.PI;
       const local=typeof element.getBBox==='function'?element.getBBox():null;
       const w=local?local.width*scale+10:b.w+10,h=local?local.height*scale+6:b.h+6;
-      shapes.push({x:b.x+b.w/2-w/2,y:b.y+b.h/2-h/2,w,h,rotation,kind:'rectangle',label,fill:'none',stroke:'none',fontSize:Math.min(200,Math.max(1,(parseFloat(css.fontSize)||16)*scale)),textColor:color(element.tagName.toLowerCase()==='div'?css.color:css.fill,'#000000'),groupId});
+      shapes.push({x:b.x+b.w/2-w/2,y:b.y+b.h/2-h/2,w,h,rotation,kind:'rectangle',label,fill:'none',stroke:'none',...window.markinkOfficeStyle.text(element,scale),groupId});
     };
     const services = db.getServices(), junctions = db.getJunctions(), groups = db.getGroups();
     for (const group of groups) {
@@ -120,7 +112,7 @@
       const points=[];
       for(let i=0;i<coordinates.length;i+=2) points.push(point(element,coordinates[i],coordinates[i+1]));
       const ink=style(element);
-      const line={points,stroke:ink.stroke,strokeWidth:ink.strokeWidth,dash:ink.dash,startArrow:edge.lhsInto?'triangle':'none',endArrow:edge.rhsInto?'triangle':'none'};
+      const line={points,...ink,startArrow:edge.lhsInto?'triangle':'none',endArrow:edge.rhsInto?'triangle':'none'};
       for(const [side,nodeId,isGroup] of [['start',edge.lhsId,edge.lhsGroup],['end',edge.rhsId,edge.rhsGroup]]) {
         const node=[...services,...junctions].find(item=>item.id===nodeId);
         const id=isGroup?'architecture-group-'+node?.in:'architecture-node-'+nodeId;

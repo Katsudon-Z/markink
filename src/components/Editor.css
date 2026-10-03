@@ -268,3 +268,7 @@
   margin: 0.5em 0;
   line-height: 1.6;
 }
+
+/* Keep drag selection in the document while crossing plugin iframes. */
+.markink-range-selecting .markink-code-preview iframe { pointer-events: none; }
+.markink-code-block.markink-range-selected { outline: 2px solid #60a5fa; outline-offset: 2px; background: #dbeafe; }

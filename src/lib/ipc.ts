@@ -88,7 +88,7 @@ export const ipc = {
     invoke<void>('plugin_log', { pluginId, level, message }),
   readFileBytes: (path: string) => invoke<number[]>('read_file_bytes', { path }),
   copyOfficeDrawing: (json: string) => invoke<void>('copy_office_drawing', { json }),
-  copyClipboardData: (format: 'text' | 'png', value: string) => invoke<void>('copy_clipboard_data', { format, value }),
+  copyClipboardData: (format: 'text' | 'png' | 'html', value: string) => invoke<void>('copy_clipboard_data', { format, value }),
   pluginInstallZip: (zipPath: string, expected: PluginInfo) => {
     if (!expected.zipSha256) return Promise.reject(new Error('ZIPプレビューのハッシュがありません'));
     return invoke<PluginInfo>('plugin_install_zip', {

@@ -53,10 +53,11 @@ function copyScript(){return `    let copying=false;
     document.addEventListener('contextmenu',(event)=>{
       if(!diagram.contains(event.target))return;
       event.preventDefault();
+      if(selectDocument&&window.markinkHostCopyMenu){parent.postMessage({type:'markink-render-context-menu',x:event.clientX,y:event.clientY},'*');return;}
       if(selectDocument)parent.postMessage({type:'markink-render-select',focus:false},'*');
       showCopyMenu(event.clientX,event.clientY);
     },true);
-    if(selectDocument)diagram.addEventListener('click',()=>parent.postMessage({type:'markink-render-select'},'*'));
+    if(selectDocument)diagram.addEventListener('click',(event)=>parent.postMessage({type:'markink-render-select',shiftKey:event.shiftKey},'*'));
     document.addEventListener('click',(event)=>{if(!menu.contains(event.target))menu.style.display='none'});
     menu.addEventListener('click',async(event)=>{
       const commandId=event.target?.dataset?.command;
@@ -66,7 +67,8 @@ function copyScript(){return `    let copying=false;
       menu.style.display='none';error.textContent='';error.style.display='none';copying=true;
       try{
         const currentSource=getSource();
-        const value=format==='text'?currentSource:format==='png'?await pngData():await window.markinkOfficeDrawing(currentSource,diagram);
+        const fence=String.fromCharCode(96).repeat(3);
+        const value=format==='text'?fence+'mermaid\\n'+currentSource+'\\n'+fence:format==='png'?await pngData():await window.markinkOfficeDrawing(currentSource,diagram);
         const targetFormat=format==='powerpoint'?'office-drawing':format;
         if(new TextEncoder().encode(value).byteLength>16*1024*1024)throw new Error('コピーする図が大きすぎます');
         parent.postMessage({type:'markink-render-copy',format:targetFormat,value},'*');
@@ -75,6 +77,15 @@ function copyScript(){return `    let copying=false;
     window.addEventListener('message',(event)=>{
       if(event.source!==parent || event.data?.type!=='markink-render-copy-result')return;
       copying=false;error.textContent=event.data.error||'';error.style.display=event.data.error?'block':'none';reportHeight();
+    });
+    window.addEventListener('message',async(event)=>{
+      if(event.source!==parent||event.data?.type!=='markink-render-export')return;
+      const requestId=event.data.requestId;
+      if(typeof requestId!=='string'||!['office-drawing','png'].includes(event.data.format))return;
+      try{
+        const value=event.data.format==='png'?await pngData():await window.markinkOfficeDrawing(getSource(),diagram);
+        parent.postMessage({type:'markink-render-export-result',requestId,value},'*');
+      }catch(cause){parent.postMessage({type:'markink-render-export-result',requestId,error:String(cause&&cause.message||cause)},'*');}
     });
 `;}
 
@@ -97,7 +108,7 @@ function editorHtml(source, bundle) {
     ${copyStyle()}
   </style><div id="top"><strong>Mermaid</strong><span id="status">描画ライブラリを読み込み中…</span><button id="save" disabled>文書に反映</button></div>
   <div id="main"><textarea id="source" spellcheck="false" aria-label="Mermaid記法"></textarea><div id="splitter" role="separator" tabindex="0" aria-label="入力欄とプレビューの幅" aria-orientation="vertical" aria-valuemin="15" aria-valuemax="85" aria-valuenow="42"></div><div id="preview"><div id="error"></div><div id="diagram"></div></div></div>
-  <div id="copy-menu"><button data-format="text">Mermaid記法</button><button data-format="powerpoint">PowerPoint図</button><button data-format="png">PNG</button></div>
+  <div id="copy-menu"><button data-format="text">マークダウンコピー</button><button data-format="powerpoint">書式付きコピー</button><button data-format="png">PNG画像コピー</button></div>
   <script>
     const source = document.getElementById('source');
     const status = document.getElementById('status');
@@ -197,7 +208,7 @@ function renderHtml(bundle, officeDrawingSource) {
     #diagram svg{display:block;max-width:100%;height:auto;margin:auto}
     #error{color:#b91c1c;white-space:pre-wrap;overflow-wrap:anywhere}
     ${copyStyle()}
-  </style><div id="diagram"></div><div id="error"></div><div id="copy-menu"><button data-command="edit-mermaid">図を編集</button><button data-format="text">Mermaid記法</button><button data-format="powerpoint">PowerPoint図</button><button data-format="png">PNG</button></div><script>
+  </style><div id="diagram"></div><div id="error"></div><div id="copy-menu"><button data-command="edit-mermaid">図を編集</button><button data-format="text">マークダウンコピー</button><button data-format="powerpoint">書式付きコピー</button><button data-format="png">PNG画像コピー</button></div><script>
     const diagram=document.getElementById('diagram');
     const error=document.getElementById('error');
     const menu=document.getElementById('copy-menu');

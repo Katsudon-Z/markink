@@ -107,7 +107,7 @@ entry は 8 MiB 以下の UTF-8 JavaScript です。entry は単一スクリプ�
 
 `openEditor()` の HTML は 16 MiB 以下、戻り値は 2 MiB 以下です。Workerからホストへの要求全体は20 MiBまでです。編集画面は本体とは別のウィンドウで開き、移動・サイズ変更できます。iframe は `allow-scripts` のみの sandbox で動き、Tauri API やホストの DOM にはアクセスできません。HTML 内のネットワーク通信は CSP で禁止し、インラインとblobのスクリプトを許可します。プラグイン停止時は編集画面も閉じられます。`applyEdit()` のMarkdownは2 MiB、`readDocument()` のMarkdownは16 MiBまでです。
 
-`registerCodeBlockRenderer(language, html)` のHTMLは16 MiB以下で、iframe内の `window.markinkCodeBlockSource` にコード本文が文字列で渡されます。図を描いた後は `parent.postMessage({ type: 'markink-render-height', height: document.body.scrollHeight }, '*')` で高さを通知できます。本体は140〜65536 pxに制限します。プラグイン停止時は通常のコードブロック表示に戻ります。同じ言語の描画は一つのプラグインだけが登録できます。iframeのsandboxとCSPは `openEditor()` と同じです。
+`registerCodeBlockRenderer(language, html)` のHTMLは16 MiB以下で、iframe内の `window.markinkCodeBlockSource` にコード本文が文字列で渡されます。図を描いた後は `parent.postMessage({ type: 'markink-render-height', height: document.body.scrollHeight }, '*')` で高さを通知できます。本体は140〜65536 pxに制限します。プラグイン停止時は通常のコードブロック表示に戻ります。同じ言語の描画は複数のプラグインが登録できます。最後に登録したプラグインを優先し、停止すると直前の有効な登録へ戻ります。同じプラグインによる同じ言語の重複登録は拒否します。iframeのsandboxとCSPは `openEditor()` と同じです。
 
 描画iframeから `parent.postMessage({ type: 'markink-render-select' }, '*')` を送ると、対応するコードブロックを選択できます。右クリックメニューを開いたままにする場合は `focus: false` を加えてください。図の上下の余白をクリックするか、図を選択して上下矢印キーを押すと、前後の段落にカーソルを置けます。隣に段落がない場合は新しい段落を作成します。
 
@@ -156,3 +156,34 @@ ZIP は 50 MiB、展開合計は 100 MiB、ファイル数は 256 件までで�
 Office図形shapesの要素に任意のgroupIdを指定すると、同じgroupIdの図形を1つのOfficeグループへまとめます。グループの枠はメンバーの配置から計算し、元の座標を保ちます。接続線はメンバーのnodeIdへ接続でき、グループの移動・サイズ変更に追従します。グループを解除すると部品ごとに編集できます。ネストしたgroupId階層はありません。文字を含むグループにはlabelを持つ透明rectangleを使えます。shapesのrotationは度単位で-360〜360を指定でき、文字枠や図形を回転します。
 
 編集画面のiframeからも markink-render-copy と markink-render-copy-result を利用できます。形式、16 MiB上限、clipboard.write / office.copy の権限はコードブロック描画と同じです。本体が編集ウィンドウのセッションとプラグインの有効状態を確認し、コピーします。コピー要求は結果を受け取ってから次を送信してください。
+
+Officeコピー試作: bezierSegmentsは予約フィールドです。現在の標準コネクタ生成には使用しません。直線はstraightConnector1、曲線は従来のcurvedConnector3で生成し、接続先と接続点を保持します。
+
+Officeスタイル: shapes / lines / texts に computedStyle / computedTextStyle を指定できます。全computed styleを文字列マップとして保持します（各1000項目、キー200bytes、値10000bytes以内）。これらのマップは保存用で、Office生成には対応する明示的IR項目を使います。追加項目: strokeOpacity / textOpacity（0〜1）、fontFamily（200bytes以内）、bold / italic / underline / strike（boolean）、lineCap（butt / round / square）、lineJoin（miter / round / bevel）、dashArray（SVG座標単位、最大64値、各0〜10000）。従来のfillOpacity / fontSize / 色 / 線幅も併用できます。dashArrayは線・空白の繰り返しで、dashより優先します。
+Mermaid変換は祖先のopacity、RGBAのalpha、変換倍率を反映します。SVGのフィルター、マスク、グラデーション、CSSの全効果、文字内の混在スタイルはOffice図形への完全再現対象ではありません。computed styleの取得は全項目ですが、反映範囲は上記IR項目です。破線offsetは保持のみでOfficeには反映しません。
+DrawingML線属性の参照仕様: https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.linepropertiestype?view=openxml-3.0.1 （custDash、線の角、矢印の要素）
+
+## 本体の範囲コピーと描画データの出力
+
+本体は選択範囲をマークダウンコピー / 書式付きコピーできます。PNG画像コピーは図形単独のNodeSelection時だけ表示します。図形単独の書式付きコピーには従来のGVMLを使用し、本文・表との混在時はGVML / HTML Format / Unicode本文を同時に設定します。HTMLには本文・表とVML図形を含みます。Officeアプリは自身の優先順位で形式を選択します。混在コピーのPowerPoint / Word / Excel互換性は実機確認が必要です。
+
+本体の描画iframeでは window.markinkHostCopyMenu がtrueになります。右クリックは parent.postMessage({type:'markink-render-context-menu',x:event.clientX,y:event.clientY},'*') で本体のメニューへ委譲してください。本体は混在選択を保持します。通常クリックの markink-render-select に shiftKey を付けると範囲選択を拡張できます。編集ウィンドウ内では従来のコピーUIを継続できます。
+
+本体は親から描画iframeへ {type:'markink-render-export',requestId,format} を送ります。formatは office-drawing / png です。描画側はクリップボードを書き換えず、{type:'markink-render-export-result',requestId,value} または {type:'markink-render-export-result',requestId,error} をparentへ返してください。valueはOffice IRのJSONまたはPNG data URLです。event.source === parentを検査してください。本体も送信元、office.copy / clipboard.write権限、16 MiB上限、15秒タイムアウト、出力中の文書変更を検査します。従来の markink-render-copy も利用できます。
+
+Office IRには任意の tables / images / clipboardHtml / clipboardText を追加できます。上限はshapes 2000、lines/texts各4000、tables 100、images 200で、要求全体16 MiBです。個別プラグインの要素数制限は引き続き適用されます。
+
+shapes/textsの paragraphs は [{runs:[{text,fontSize,fontFamily,textColor,bold?,italic?,underline?,strike?}]}] です。指定時はlabelより優先します。alignはleft / center / rightです。本文の文字装飾を1つの文字枠の中に保持します。
+
+tablesの要素は {x,y,w,h,columns:[幅...],rows:[{height,cells:[{label,paragraphs?,fill?,align?,colspan?,rowspan?,hMerge?,vMerge?}]}]} です。DrawingMLのネイティブ表へ変換します。最大100列/1000行、各行のcells数はcolumns数と一致させます。結合の継続セルも含め、hMerge / vMergeを指定します。
+
+imagesの要素は {x,y,w,h,png} です。pngはdata URL接頭辞を除いたPNG base64で、パッケージに埋め込みます。
+
+本体の範囲コピーは表セル内図形・画像、入れ子表には未対応です。未対応要素を黙って削除せず、コピーを中断して説明します。SVGの外部参照・HTMLラベル・グラデーション等も汎用変換の対象外です。HTML/VMLとGVMLで図形の曲線・接続追従・グループの再現範囲は異なります。Word/ExcelがHTMLを優先して図形を受け取らない場合は、実機採取を基に形式の調整が必要です。
+
+参照仕様: https://learn.microsoft.com/ja-jp/windows/win32/dataxchg/html-clipboard-format
+GVML graphicFrame: https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.graphicframe?view=openxml-3.0.1
+
+Officeデータ生成とクリップボード書き込みは本体のRust実装で処理します。コピー時にPowerShellや外部プロセスは起動しません。Windows APIへ即時に全形式を書き込みます。プラグイン側のAPIとデータ形式は変更ありません。
+
+本体の書式付き範囲コピーは、図形・画像を含まない本文/表の場合、HTML FormatとUnicode本文だけを設定します。Excelのセルへの貼り付けを優先するため、この場合はGVMLを出力しません。図形/画像を含む混在範囲と図形単独は従来のOffice図形形式を使用します。内部IPCのhtml形式は本体用であり、プラグインの公開コピー形式に追加していません。

@@ -31,22 +31,8 @@
       if (parts[4] === '0') return 'none';
       return '#' + parts.slice(1, 4).map(p => Number(p).toString(16).padStart(2, '0')).join('').toUpperCase();
     };
-    const appearance = element => {
-      const css = getComputedStyle(element);
-      const segments = (css.strokeDasharray || '').match(/[0-9]*\.?[0-9]+/g) || [];
-      return {
-        fill: color(css.fill, 'none'), stroke: color(css.stroke, 'none'),
-        fillOpacity: Math.min(1, Math.max(0, (Number(css.fillOpacity || 1)) * (Number(css.opacity || 1)) * (Number((css.fill || '').match(/^rgba\([^)]*,\s*([0-9.]+)\)$/)?.[1] || 1)))),
-        strokeWidth: Math.min(100, Math.max(0, parseFloat(css.strokeWidth) || 0)),
-        dash: segments.some(p => Number(p) > 0) ? 'dot' : 'solid'
-      };
-    };
-    const textStyle = element => {
-      // Mermaid sets the actor background on text.actor and the ink on its tspan.
-      const ink = [...element.querySelectorAll('tspan')].find(span => span.textContent.trim()) || element;
-      const css = getComputedStyle(ink);
-      return { fontSize: Math.min(200, Math.max(1, parseFloat(css.fontSize) || 16)), textColor: color(css.fill, '#000000') };
-    };
+    const appearance = element => window.markinkOfficeStyle.shape(element);
+    const textStyle = element => window.markinkOfficeStyle.text(element);
     const label = element => {
       const spans = [...element.querySelectorAll(':scope > tspan')];
       return (spans.length ? spans.map(span => span.textContent).join('\n') : element.textContent).trim().slice(0, 1000);

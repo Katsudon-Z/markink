@@ -1,0 +1,32 @@
+{
+  "id": "markink.mermaid-wysiwyg",
+  "name": "Mermaid ビジュアルエディタ",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "description": "Mermaidフローチャートを図上で編集し、記法・PNG・PowerPoint図としてコピーします。",
+  "author": "markink",
+  "entry": "index.js",
+  "permissions": [
+    "document.read",
+    "document.edit",
+    "ui.register",
+    "ui.dialog",
+    "package.read",
+    "clipboard.write",
+    "office.copy"
+  ],
+  "fileHashes": {
+    "index.js": "735e6f17fa202b09da5661081c9a1adac6d5d152308799eb7f7bd2e209a8c9bb",
+    "visual-editor.html": "6403281f825fc77e247018a7b64f5efd19188f0c75b091366c513dd3ece4ffe6",
+    "visual-editor.js": "604a7415213fa7c8ec85535737872f63b4b548c2ac5a707c4da7f3d87cf5a2f0",
+    "wysiwyg.bundle.js": "4ada4ddc6a71204f0de0bf7bed2065c0cdee39f3399ef31416d2ba37ec810cd2",
+    "README.md": "3459513181f71c9dde76027826134281f6ae9c64fa6ee9869cf7ce70c9c5b531",
+    "THIRD_PARTY_NOTICES.txt": "53eed4591766a430ce2b42defb81dbd197c8c4dc32377126756a9b06dea33d58",
+    "mermaid.bundle.js": "97b6f0b6cdbbe12266f6975aef0b73952d29e3abb43052d383f77099fac272f7",
+    "office-drawing.js": "f16119fe45bc674778e974e93376a216b29b6b383d7216674158ad60f31f3c22",
+    "sequence-office-drawing.js": "811e0ad3446c6de82e638e36e7ea8eee82ab5f7d293636954f6bd8d24bf15eb4",
+    "state-office-drawing.js": "1d5e5e9bfeec32270b45f9e27f527c598401fc729008bc51d4f2161dc7cf5090",
+    "pie-office-drawing.js": "17e3794cccd42b5dbc9dbb3762f50888e4196709ab9a7f347594aaec42b17957",
+    "architecture-office-drawing.js": "bca07b09456bad70e64f16a5e15b97567a2060123d1866e73af61bf25834a80c"
+  }
+}

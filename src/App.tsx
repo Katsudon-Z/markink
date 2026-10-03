@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { EditorView } from 'prosemirror-view';
-import { TextSelection } from 'prosemirror-state';
+import { NodeSelection, TextSelection, type Selection } from 'prosemirror-state';
+import { canCopyPng, copySelectionFormatted, copySelectionMarkdown, copySelectionPng } from './lib/prosemirror/officeDocument';
 import { Editor } from './components/Editor';
 import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
@@ -327,6 +328,24 @@ function App() {
   }, [pluginCommands, runPluginCommand, notifyHuman]);
   const [pluginMenu, setPluginMenu] = useState<{ x: number; y: number } | null>(null);
   const pluginMenuRef = useRef<HTMLDivElement | null>(null);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const runSelectionCopy = async (format: 'markdown' | 'formatted' | 'png') => {
+    const view = viewRef.current;
+    setPluginMenu(null);
+    if (!view || copyBusy) return;
+    setCopyBusy(true);
+    try { await (format === 'markdown' ? copySelectionMarkdown(view) : format === 'formatted' ? copySelectionFormatted(view) : copySelectionPng(view)); }
+    catch (error) { notifyHuman(String(error)); }
+    finally { setCopyBusy(false); }
+  };
+  useEffect(() => {
+    const onContextMenu = (event: Event) => {
+      const detail = (event as CustomEvent<{ x: number; y: number }>).detail;
+      if (detail) setPluginMenu(detail);
+    };
+    window.addEventListener('markink-copy-context-menu', onContextMenu);
+    return () => window.removeEventListener('markink-copy-context-menu', onContextMenu);
+  }, []);
   useEffect(() => {
     if (!pluginMenu) return;
     const closeOutside = (event: MouseEvent) => {
@@ -684,12 +703,17 @@ function App() {
 
       <main className="app-main" onContextMenu={(event) => {
         if (!(event.target instanceof Element) || !event.target.closest('.ProseMirror')) return;
-        if (!pluginCommands.some((item) => item.command.contextMenu)) return;
         event.preventDefault();
         const view = viewRef.current;
         const position = view?.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
         if (view && position != null && view.state.selection.empty) {
-          const selection = TextSelection.near(view.state.doc.resolve(position));
+          const target = event.target.closest('img');
+          let selection: Selection = TextSelection.near(view.state.doc.resolve(position));
+          if (target) {
+            const imagePos = view.posAtDOM(target, 0);
+            const node = view.state.doc.nodeAt(imagePos);
+            if (node?.type.name === 'image') selection = NodeSelection.create(view.state.doc, imagePos);
+          }
           view.dispatch(view.state.tr.setSelection(selection));
         }
         setPluginMenu({ x: event.clientX, y: event.clientY });
@@ -712,7 +736,10 @@ function App() {
       </main>
 
       {pluginMenu && (
-        <div ref={pluginMenuRef} className="plugin-context-menu" style={{ position: 'fixed', left: Math.min(pluginMenu.x, window.innerWidth - 270), top: Math.min(pluginMenu.y, window.innerHeight - 260), zIndex: 1000 }}>
+        <div ref={pluginMenuRef} className="plugin-context-menu" onMouseDown={event => event.preventDefault()} style={{ position: 'fixed', left: Math.max(0, Math.min(pluginMenu.x, window.innerWidth - 270)), top: Math.max(0, Math.min(pluginMenu.y, window.innerHeight - 320)), zIndex: 1000 }}>
+          <button className="plugin-menu-item" disabled={copyBusy || !viewRef.current || viewRef.current.state.selection.empty} onClick={() => void runSelectionCopy('markdown')}>マークダウンコピー</button>
+          <button className="plugin-menu-item" disabled={copyBusy || !viewRef.current || viewRef.current.state.selection.empty} onClick={() => void runSelectionCopy('formatted')}>書式付きコピー</button>
+          {viewRef.current && canCopyPng(viewRef.current) && <button className="plugin-menu-item" disabled={copyBusy} onClick={() => void runSelectionCopy('png')}>PNG画像コピー</button>}
           {pluginCommands.filter((item) => item.command.contextMenu).map((item) => (
             <button key={item.key} className="plugin-menu-item" onClick={() => {
               setPluginMenu(null);

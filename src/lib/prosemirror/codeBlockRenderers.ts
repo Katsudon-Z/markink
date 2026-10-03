@@ -4,18 +4,36 @@ import type { EditorView, NodeView } from 'prosemirror-view';
 import { ipc } from '../ipc';
 
 interface Renderer { pluginId: string; html: string; clipboard: boolean; office: boolean }
-const renderers = new Map<string, Renderer>();
+const renderers = new Map<string, Renderer[]>();
+const activeRenderer = (language: string) => {
+  const candidates = renderers.get(language);
+  return candidates?.[candidates.length - 1];
+};
 const listeners = new Set<() => void>();
+interface Exporter { position: () => number | undefined; request: (format: 'office-drawing' | 'png') => Promise<string> }
+const exporters = new WeakMap<EditorView, Set<Exporter>>();
+export function hasCodeBlockRenderer(node: ProseMirrorNode): boolean {
+  return node.type.name === 'code_block' && Boolean(activeRenderer(String(node.attrs.params ?? '').trim().toLowerCase()));
+}
+export function exportCodeBlock(view: EditorView, pos: number, format: 'office-drawing' | 'png'): Promise<string> {
+  const exporter = [...(exporters.get(view) ?? [])].find(item => item.position() === pos);
+  if (!exporter) return Promise.reject(new Error('図形の描画が完了していません'));
+  return exporter.request(format);
+}
 
 export function registerCodeBlockRenderer(pluginId: string, language: string, html: string, clipboard: boolean, office: boolean): () => void {
   const key = language.toLowerCase();
-  if (renderers.has(key)) throw new Error(`${language} の描画は既に登録されています。`);
+  const candidates = renderers.get(key) ?? [];
+  if (candidates.some((item) => item.pluginId === pluginId)) throw new Error(`${language} の描画はこのプラグインで既に登録されています。`);
   const renderer = { pluginId, html, clipboard, office };
-  renderers.set(key, renderer);
+  renderers.set(key, [...candidates, renderer]);
   for (const listener of listeners) listener();
   return () => {
-    if (renderers.get(key) !== renderer) return;
-    renderers.delete(key);
+    const current = renderers.get(key);
+    if (!current?.includes(renderer)) return;
+    const remaining = current.filter((item) => item !== renderer);
+    if (remaining.length) renderers.set(key, remaining);
+    else renderers.delete(key);
     for (const listener of listeners) listener();
   };
 }
@@ -50,8 +68,43 @@ export function codeBlockNodeView(node: ProseMirrorNode, view: EditorView, getPo
   let current = node;
   let displayedHtml = '';
   let displayedSource = '';
+  let sequence = 0;
+  const pending = new Map<string, { resolve: (value: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; source: string; renderer: Renderer }>();
+  const exporter: Exporter = { position: getPos, request(format) {
+    const renderer = activeRenderer(String(current.attrs.params ?? '').trim().toLowerCase());
+    if (!renderer || !(format === 'png' ? renderer.clipboard : renderer.office)) return Promise.reject(new Error('図形プラグインにこの形式の出力権限がありません'));
+    const requestId = String(++sequence);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pending.delete(requestId); reject(new Error('図形プラグインが出力要求に応答しません。更新したプラグインを導入してください')); }, 15000);
+      pending.set(requestId, { resolve, reject, timer, source: current.textContent, renderer });
+      frame.contentWindow?.postMessage({ type: 'markink-render-export', requestId, format }, '*');
+    });
+  } };
+  const viewExporters = exporters.get(view) ?? new Set<Exporter>();
+  viewExporters.add(exporter); exporters.set(view, viewExporters);
   const onMessage = (event: MessageEvent) => {
     if (event.source !== frame.contentWindow) return;
+    if (event.data?.type === 'markink-render-export-result') {
+      const request = pending.get(String(event.data.requestId));
+      if (!request) return;
+      pending.delete(String(event.data.requestId)); clearTimeout(request.timer);
+      const renderer = activeRenderer(String(current.attrs.params ?? '').trim().toLowerCase());
+      if (renderer !== request.renderer || current.textContent !== request.source) { request.reject(new Error('出力中に図形が変更されました')); return; }
+      if (event.data.error) { request.reject(new Error(String(event.data.error))); return; }
+      if (typeof event.data.value !== 'string' || new TextEncoder().encode(event.data.value).byteLength > 16 * 1024 * 1024) { request.reject(new Error('図形の出力データが不正です')); return; }
+      request.resolve(event.data.value); return;
+    }
+    if (event.data?.type === 'markink-render-context-menu') {
+      const pos = getPos();
+      if (pos === undefined) return;
+      const selection = view.state.selection;
+      if (selection.empty || selection.from > pos + 1 || selection.to < pos + current.nodeSize - 1) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+      const rect = frame.getBoundingClientRect();
+      const x = Number(event.data.x), y = Number(event.data.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      dom.dispatchEvent(new CustomEvent('markink-copy-context-menu', { bubbles: true, detail: { x: rect.left + Math.max(0, Math.min(rect.width, x)), y: rect.top + Math.max(0, Math.min(rect.height, y)) } }));
+      return;
+    }
     if (event.data?.type === 'markink-render-height') {
       const height = Number(event.data.height);
       if (Number.isFinite(height)) {
@@ -63,13 +116,16 @@ export function codeBlockNodeView(node: ProseMirrorNode, view: EditorView, getPo
     if (event.data?.type === 'markink-render-select') {
       const pos = getPos();
       if (pos !== undefined) {
-        view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+        const selection = event.data.shiftKey
+          ? TextSelection.create(view.state.doc, view.state.selection.anchor, view.state.selection.anchor > pos ? pos + 1 : pos + current.nodeSize - 1)
+          : NodeSelection.create(view.state.doc, pos);
+        view.dispatch(view.state.tr.setSelection(selection));
         if (event.data.focus !== false) view.focus();
       }
       return;
     }
     if (event.data?.type === 'markink-render-command') {
-      const renderer = renderers.get(String(current.attrs.params ?? '').trim().toLowerCase());
+      const renderer = activeRenderer(String(current.attrs.params ?? '').trim().toLowerCase());
       const commandId = event.data.commandId;
       const pos = getPos();
       if (!renderer || pos === undefined || typeof commandId !== 'string' || !/^[a-z][a-z0-9._-]{0,63}$/.test(commandId)) return;
@@ -80,7 +136,7 @@ export function codeBlockNodeView(node: ProseMirrorNode, view: EditorView, getPo
       return;
     }
     if (event.data?.type !== 'markink-render-copy') return;
-    const renderer = renderers.get(String(current.attrs.params ?? '').trim().toLowerCase());
+    const renderer = activeRenderer(String(current.attrs.params ?? '').trim().toLowerCase());
     const data = event.data as { format?: unknown; value?: unknown };
     if (!renderer || typeof data.value !== 'string' || data.value.length > 16 * 1024 * 1024) return;
     const value = data.value;
@@ -143,7 +199,7 @@ export function codeBlockNodeView(node: ProseMirrorNode, view: EditorView, getPo
   view.dom.addEventListener('keydown', onKeyDown, true);
   const refresh = () => {
     const language = String(current.attrs.params ?? '').trim().toLowerCase();
-    const renderer = renderers.get(language);
+    const renderer = activeRenderer(language);
     const source = current.textContent;
     const active = Boolean(renderer);
     if (preview.hidden !== !active) preview.hidden = !active;
@@ -162,7 +218,7 @@ export function codeBlockNodeView(node: ProseMirrorNode, view: EditorView, getPo
     displayedSource = source;
     frame.style.height = '180px';
     const initial = JSON.stringify(source).replace(/</g, '\\u003c');
-    frame.srcdoc = `${CSP}<script>window.markinkCodeBlockSource=${initial}</script>${renderer.html}`;
+    frame.srcdoc = `${CSP}<script>window.markinkHostCopyMenu=true;window.markinkCodeBlockSource=${initial}</script>${renderer.html}`;
   };
   const listener = () => refresh();
   listeners.add(listener);
@@ -185,6 +241,9 @@ export function codeBlockNodeView(node: ProseMirrorNode, view: EditorView, getPo
       return mutation.type !== 'selection' && !code.contains(mutation.target);
     },
     destroy() {
+      viewExporters.delete(exporter);
+      for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('図形の表示が終了しました')); }
+      pending.clear();
       listeners.delete(listener);
       window.removeEventListener('message', onMessage);
       preview.removeEventListener('click', onClick);

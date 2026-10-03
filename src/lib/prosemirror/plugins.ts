@@ -12,6 +12,7 @@ import { schema } from './schema';
 import { placeholderPlugin } from './image';
 import { documentVersionPlugin } from '../document/version';
 import { lineNumbersPlugin } from './lineNumbers';
+import { rangeSelectionPlugin } from './rangeSelection';
 
 export const PLACEHOLDER_HINT =
   '入力例: ここに入力してください。上部のボタンで見出しや箇条書きも作れます。';
@@ -89,6 +90,7 @@ export function createBasePlugins({ historyMode, collabHistory }: BasePluginOpti
   });
 
   return [
+    rangeSelectionPlugin(),
     markdownInput,
     ...historyPlugins,
     // 表のセル移動 (Tab/Shift-Tab) などは keymap より先に評価する
