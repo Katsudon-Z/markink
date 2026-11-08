@@ -141,11 +141,6 @@
   pointer-events: none;
 }
 
-/* AIカーソルの選択範囲 (薄い紫) */
-.mdn-ai-selection {
-  background: rgba(124, 58, 237, 0.15);
-}
-
 /* 共同編集での他者の修正箇所 (薄い色 → 10秒で透明に) */
 .mdn-remote-change {
   border-radius: 2px;
@@ -217,6 +212,29 @@
   padding: 0;
 }
 
+.markink-code-preview {
+  margin: 0.5em 0;
+  border: 1px solid #d7dde7;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.markink-code-preview iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+}
+
+.markink-code-block.ProseMirror-selectednode .markink-code-preview {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.markink-code-insert-zone { height: 8px; cursor: text; }
+.markink-code-insert-zone[hidden] { display: none; }
+.markink-code-insert-zone:hover { background: #eff6ff; }
+
 /* フォーカス時のスタイル */
 .ProseMirror-focused {
   outline: none;
@@ -250,3 +268,7 @@
   margin: 0.5em 0;
   line-height: 1.6;
 }
+
+/* Keep drag selection in the document while crossing plugin iframes. */
+.markink-range-selecting .markink-code-preview iframe { pointer-events: none; }
+.markink-code-block.markink-range-selected { outline: 2px solid #60a5fa; outline-offset: 2px; background: #dbeafe; }

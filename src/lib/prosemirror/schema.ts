@@ -6,7 +6,14 @@ import { tableNodes } from 'prosemirror-tables';
 // 表 (prosemirror-tables)。セルには段落などのブロックを入れられるようにする
 const tableSpec = tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} });
 
+const codeBlockSpec = basicSchema.spec.nodes.get('code_block');
+if (!codeBlockSpec) throw new Error('code_block schema is missing');
+
 const nodes = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block')
+  .update('code_block', {
+    ...codeBlockSpec,
+    attrs: { params: { default: '' } }
+  })
   .append(tableSpec)
   .addToEnd(
   // Markdown の HTML コメント (編集画面では既定で非表示)

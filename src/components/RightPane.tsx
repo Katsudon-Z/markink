@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react';
 import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
-import { getOutline, type OutlineHeading } from '../lib/mcp/document';
-import { subscribeDocVersion } from '../lib/mcp/docVersion';
+import { getOutline, type OutlineHeading } from '../lib/document/outline';
+import { subscribeDocumentVersion } from '../lib/document/version';
 
 interface RightPaneProps {
   getView: () => EditorView | null;
-  peers: { clientID: number; name: string; color: string; ai?: boolean }[];
-  aiName?: string | null;
+  peers: { clientID: number; name: string; color: string }[];
   collabActive: boolean;
 }
 
@@ -16,7 +15,7 @@ interface RightPaneProps {
  * 右ペイン: 目次 (見出し一覧・クリックで移動) と、その下に共同編集の参加者一覧。
  * 目次は文書版の進行に追従して更新する。
  */
-export function RightPane({ getView, peers, aiName, collabActive }: RightPaneProps) {
+export function RightPane({ getView, peers, collabActive }: RightPaneProps) {
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
 
   useEffect(() => {
@@ -44,7 +43,7 @@ export function RightPane({ getView, peers, aiName, collabActive }: RightPanePro
       }
     };
     recompute();
-    const unsub = subscribeDocVersion((_info, doc) => recompute(doc));
+    const unsub = subscribeDocumentVersion((doc) => recompute(doc));
     return unsub;
   }, [getView, collabActive]);
 
@@ -61,7 +60,7 @@ export function RightPane({ getView, peers, aiName, collabActive }: RightPanePro
     }
   };
 
-  const showPeers = collabActive || aiName != null;
+  const showPeers = collabActive;
 
   return (
     <aside className="right-pane" aria-label="目次と参加者">
@@ -94,7 +93,6 @@ export function RightPane({ getView, peers, aiName, collabActive }: RightPanePro
               {peers.map((p) => (
                 <li key={p.clientID}>
                   <span className="collab-peer-dot" style={{ background: p.color }} />
-                  {p.ai && <span className="collab-peer-ai">AI</span>}
                   {p.name}
                 </li>
               ))}

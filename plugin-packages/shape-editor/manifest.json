@@ -1,0 +1,19 @@
+{
+  "id": "markink.shape-editor",
+  "name": "図形エディタ",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "四角形、楕円、線、文字を配置してSVG図形を作成・再編集します。",
+  "author": "markink",
+  "entry": "index.js",
+  "permissions": [
+    "document.read",
+    "document.edit",
+    "ui.register",
+    "ui.dialog"
+  ],
+  "fileHashes": {
+    "index.js": "290e78b1c99b45b9beff21b76287690fb8f07944c4ef539c0f702a466eeb85da",
+    "README.md": "69f86eb89c45fbbe8537e503900634ba719c41078d34e4575a43dbcdfa1fea55"
+  }
+}

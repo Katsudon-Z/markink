@@ -3,7 +3,7 @@ import { Decoration, DecorationSet } from 'prosemirror-view';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { ySyncPluginKey } from 'y-prosemirror';
-import { getAttachedAwareness, type AwarenessLike } from '../mcp/presence';
+import { getAttachedAwareness, type AwarenessLike } from './awareness';
 
 // 共同編集時、他端末 (他者) が編集した箇所を薄くハイライトする。
 // 色はその参加者のカーソル色を使い、10秒で消える。
@@ -114,7 +114,7 @@ export function remoteHighlightPlugin(): Plugin {
     appendTransaction(trs, oldState, newState) {
       // リモート変更の検知: y-sync の isChangeOrigin メタが第一。
       // キー実体の不一致に備え、addToHistory:false + 文書変化でも拾う
-      // (y-sync の _tr は addToHistory を付けない。AI/人間の通常編集は付けない)。
+      // (y-sync の _tr は addToHistory を付けない。通常のローカル編集は付けない)。
       const remote = trs.some((tr) => {
         if (
           (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | null)?.isChangeOrigin ===

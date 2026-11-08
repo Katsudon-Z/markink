@@ -1,0 +1,6 @@
+html, body, #editor-root { height: 100%; margin: 0; }
+body { font: 13px 'Segoe UI', Meiryo, sans-serif; background: #fff; }
+#editor-root { display: flex; flex-direction: column; }
+#plugin-editor-frame { flex: 1; min-height: 0; width: 100%; border: 0; }
+#editor-actions { display: flex; justify-content: flex-end; padding: 8px 12px; border-top: 1px solid #d1d5db; }
+#editor-cancel { padding: 6px 14px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; cursor: pointer; }

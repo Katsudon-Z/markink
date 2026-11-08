@@ -7,8 +7,6 @@ interface StatusBarProps {
   collabActive: boolean;
   peersCount: number;
   diagnostics: CollabDiagnostics;
-  /** 接続中のAI表示名 (例: "AI: Claude Desktop"。未接続なら null) */
-  aiName?: string | null;
 }
 
 function connectionSummary(diag: CollabDiagnostics, peersCount: number): string {
@@ -23,8 +21,7 @@ export const StatusBar = React.memo(function StatusBar({
   path,
   collabActive,
   peersCount,
-  diagnostics,
-  aiName
+  diagnostics
 }: StatusBarProps) {
   return (
     <footer className="status-bar" role="status" aria-live="polite">
@@ -32,7 +29,6 @@ export const StatusBar = React.memo(function StatusBar({
         {path ?? '未保存の文書'}
       </span>
       <span className="status-right">
-        {aiName && <span className="status-ai-badge" title="AIが共同編集中">{aiName} 接続中</span>}
         {collabActive
           ? `共同編集中 — ${connectionSummary(diagnostics, peersCount)}`
           : '単独編集中 — 共同編集を開始すると同期状態を表示します'}

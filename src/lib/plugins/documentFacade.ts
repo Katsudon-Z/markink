@@ -1,0 +1,133 @@
+import type { EditorView } from 'prosemirror-view';
+import { NodeSelection } from 'prosemirror-state';
+import { markdownParser, markdownSerializer } from '../prosemirror/markdown';
+import { getDocumentRevision } from '../document/revision';
+import type { DocumentSnapshot, EditProposal, EditResult } from './api';
+
+const MAX_EDIT_BYTES = 2 * 1024 * 1024;
+const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
+
+export interface DocumentFacadeOptions {
+  getView: () => EditorView | null;
+  getTitle: () => string;
+  getRevision?: () => number;
+  confirmEdit: (proposal: EditProposal, documentSize: number) => Promise<boolean>;
+}
+
+/** Stable document API adapter; editor and collaboration objects stay inside the host. */
+export class DocumentFacade {
+  constructor(private readonly options: DocumentFacadeOptions) {}
+
+  read(): DocumentSnapshot {
+    const view = this.requireView();
+    const markdown = markdownSerializer.serialize(view.state.doc);
+    const selection = view.state.selection;
+    const selectedNode = selection instanceof NodeSelection ? selection.node : null;
+    const selectedImage = selectedNode?.type.name === 'image' ? {
+      src: String(selectedNode.attrs.src ?? ''),
+      alt: String(selectedNode.attrs.alt ?? ''),
+      from: selection.from,
+      to: selection.to
+    } : null;
+    let selectedCodeBlock: DocumentSnapshot['selectedCodeBlock'] = null;
+    if (selectedNode?.type.name === 'code_block') {
+      selectedCodeBlock = {
+        params: String(selectedNode.attrs.params ?? ''),
+        text: selectedNode.textContent,
+        from: selection.from,
+        to: selection.to
+      };
+    } else {
+      for (let depth = selection.$from.depth; depth > 0; depth -= 1) {
+        const node = selection.$from.node(depth);
+        if (node.type.name !== 'code_block') continue;
+        const from = selection.$from.before(depth);
+        const to = selection.$from.after(depth);
+        if (selection.to <= to) {
+          selectedCodeBlock = {
+            params: String(node.attrs.params ?? ''),
+            text: node.textContent,
+            from,
+            to
+          };
+        }
+        break;
+      }
+    }
+    if (new TextEncoder().encode(markdown).byteLength > MAX_SNAPSHOT_BYTES) {
+      throw new Error('文書が大きすぎるため、拡張APIでは全文を返せません。');
+    }
+    return {
+      title: this.options.getTitle(),
+      markdown,
+      selection: {
+        from: view.state.selection.from,
+        to: view.state.selection.to
+      },
+      revision: this.revision(),
+      size: view.state.doc.content.size,
+      selectedText: view.state.doc.textBetween(view.state.selection.from, view.state.selection.to, '\n'),
+      textBeforeCursor: view.state.doc.textBetween(Math.max(0, view.state.selection.from - 100000), view.state.selection.from, '\n'),
+      selectedImage,
+      selectedCodeBlock
+    };
+  }
+
+  async applyEdit(proposal: EditProposal, canApply: () => boolean = () => true): Promise<EditResult> {
+    if (!canApply()) throw new Error('プラグインは停止しました。');
+    if (new TextEncoder().encode(proposal.markdown).byteLength > MAX_EDIT_BYTES) {
+      throw new Error('編集提案が大きすぎます (上限 2 MiB)。');
+    }
+    const view = this.requireView();
+    const { doc } = view.state;
+    if (proposal.baseRevision !== this.revision()) {
+      throw new Error('文書が更新されています。最新の内容を読み直してから編集してください。');
+    }
+    if (
+      !Number.isInteger(proposal.from) ||
+      !Number.isInteger(proposal.to) ||
+      proposal.from < 0 ||
+      proposal.to < proposal.from ||
+      proposal.to > doc.content.size
+    ) {
+      throw new Error('編集範囲が現在の文書範囲外です。');
+    }
+
+    const isWholeDocument = proposal.from === 0 && proposal.to === doc.content.size;
+    if (isWholeDocument) {
+      const approved = await this.options.confirmEdit(proposal, doc.content.size);
+      if (!approved) throw new Error('編集はキャンセルされました。');
+    }
+
+    // Confirmation may take time; refuse to apply coordinates against a changed document.
+    if (proposal.baseRevision !== this.revision()) {
+      throw new Error('確認中に文書が更新されました。最新の内容を読み直してください。');
+    }
+    if (!canApply()) throw new Error('プラグインは停止しました。');
+
+    const parsed = markdownParser.parse(proposal.markdown);
+    const inlineSelection = doc.resolve(proposal.from).parent.inlineContent
+      && doc.resolve(proposal.to).parent === doc.resolve(proposal.from).parent;
+    const fragment = inlineSelection && parsed.childCount === 1 && parsed.firstChild?.type.name === 'paragraph'
+      ? parsed.firstChild.content
+      : parsed.content;
+    if (!canApply()) throw new Error('プラグインは停止しました。');
+    const transaction = view.state.tr.replaceWith(proposal.from, proposal.to, fragment);
+    view.dispatch(transaction);
+    // Block insertion may split its surrounding paragraph. Return the fitted range,
+    // including those boundaries, so a subsequent edit replaces the same content.
+    const from = transaction.mapping.map(proposal.from, -1);
+    const to = transaction.mapping.map(proposal.to, 1);
+    return { from, to, revision: this.revision() };
+  }
+
+  private revision(): number {
+    return (this.options.getRevision ?? getDocumentRevision)();
+  }
+
+  private requireView(): EditorView {
+    const view = this.options.getView();
+    if (!view || view.isDestroyed) throw new Error('編集できる文書が開かれていません。');
+    return view;
+  }
+}

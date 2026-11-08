@@ -1,16 +1,25 @@
 // markink バックエンド: 各関心ごとにモジュール分割し、ここは編成のみを行う
-mod ai_serve;
 mod autosave;
 mod collab_host;
 mod collab_relay;
 mod document;
 mod fsutil;
-mod mcp;
+mod legacy_migration;
+mod logging;
+mod plugin_secrets;
+mod office_copy;
+#[cfg(windows)]
+mod office_drawing;
+#[cfg(windows)]
+mod clipboard;
+mod plugin_state;
+mod plugins;
 mod settings;
 mod startup;
 
 use collab_host::{collab_probe_signal, collab_release_signal, collab_resolve_signal};
 use document::CurrentDocument;
+use tauri::Manager;
 
 #[tauri::command]
 fn collab_relay_stats(room: String) -> Option<collab_relay::RelayStats> {
@@ -19,24 +28,34 @@ fn collab_relay_stats(room: String) -> Option<collab_relay::RelayStats> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // mcp-stdio モード: GUI を起動せず、stdin/stdout ⇄ 本体WS の中継専用プロセスとして動く。
-    // single-instance プラグインより前で分岐すること (mcp-plan.md §2.0)。
-    if mcp::transport_stdio::is_stdio_mode() {
-        mcp::transport_stdio::run_stdio_mode();
-    }
-
     startup::init_from_args();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                for (label, editor) in window.app_handle().webview_windows() {
+                    if label != "main" {
+                        let _ = editor.destroy();
+                    }
+                }
+            }
+        })
+        .setup(|_app| {
+            plugins::recover_interrupted_updates();
+            if let Err(error) = legacy_migration::run() {
+                eprintln!("markink: 旧設定の移行に失敗しました: {error}");
+            }
+            let settings = settings::load();
+            let _ =
+                logging::initialize(settings.file_logging_enabled, &settings.file_logging_level);
             // 開発版では画面キャプチャしやすいようにコンテンツ保護を解除する。
             // リリースビルドではこのブロック自体をコンパイルしない。
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = _app.get_webview_window("main") {
                     window.set_content_protected(false)?;
                 }
             }
@@ -45,12 +64,6 @@ pub fn run() {
         // 複数起動を許可する (単一起動プラグインは使わない)。
         // 文書フォルダごとに .markink マーカーで合流するため、別文書は干渉しない。
         .manage(CurrentDocument::default())
-        // 終了時にAIデーモンを掃除する (孤児化すると次回起動時のポート競合になる)
-        .on_window_event(|_win, event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                ai_serve::shutdown();
-            }
-        })
         .invoke_handler(tauri::generate_handler![
             // document
             document::read_markdown,
@@ -72,30 +85,34 @@ pub fn run() {
             collab_resolve_signal,
             collab_probe_signal,
             collab_release_signal,
-            // AI共同編集 (MCP)
-            settings::mcp_get_settings,
+            settings::get_settings,
             settings::set_restore_enabled,
             settings::set_user_name,
             settings::os_username,
             settings::set_line_numbers,
             settings::set_image_path_mode,
             settings::set_editor_font,
-            mcp::mcp_autostart,
-            mcp::mcp_set_enabled,
-            mcp::mcp_regenerate_token,
-            mcp::mcp_status,
-            mcp::mcp_disconnect_ai,
-            mcp::mcp_get_ai_auto_save,
-            mcp::mcp_set_ai_auto_save,
-            mcp::mcp_exe_path,
-            mcp::notify::mcp_doc_changed,
-            mcp::gateway::mcp_response,
-            // エディタ起点のAI呼び出し (opencode serve)
-            ai_serve::ai_status,
-            ai_serve::ai_set_enabled,
-            ai_serve::ai_set_config,
-            ai_serve::ai_ask,
-            ai_serve::ai_abort
+            settings::set_file_logging,
+            plugins::plugin_install_zip,
+            plugins::plugin_list,
+            plugins::plugin_preview_zip,
+            plugins::plugin_read_entry,
+            plugins::plugin_read_package_text,
+            plugins::plugin_get_setting,
+            plugins::plugin_set_setting,
+            plugins::plugin_request_json,
+            plugins::plugin_has_api_key,
+            plugins::plugin_set_api_key,
+            plugins::plugin_delete_api_key,
+            plugins::plugin_uninstall,
+            plugins::plugin_has_pending_update,
+            plugins::plugin_commit_update,
+            plugins::plugin_rollback_update,
+            plugin_state::plugin_enabled_ids,
+            plugin_state::plugin_set_enabled,
+            logging::plugin_log,
+            office_copy::copy_office_drawing,
+            office_copy::copy_clipboard_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

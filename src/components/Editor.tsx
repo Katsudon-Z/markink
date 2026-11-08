@@ -2,8 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { EditorView } from 'prosemirror-view';
 import { createEditorView } from '../lib/prosemirror/editor';
 import { handleImageDropPasteFactory } from '../lib/prosemirror/image';
-import type { AiModeId } from '../lib/ipc';
-import { FORMAT_SHORTCUTS } from '../lib/ai/shortcuts';
+import { FORMAT_SHORTCUTS } from '../lib/prosemirror/shortcuts';
 import { setLineNumbersVisible } from '../lib/prosemirror/lineNumbers';
 import './Editor.css';
 
@@ -21,10 +20,6 @@ interface EditorProps {
   fontSizePx?: number;
   /** エディタのフォントファミリ (CSS値)。空ならCSS既定 */
   fontFamily?: string;
-  /** Ctrl+Space でAI続きを直接挿入 (確認なし)。処理したら true */
-  onAiContinue?: () => boolean;
-  /** AIショートカット (要約/質問/編集代行) */
-  onAiShortcut?: (mode: AiModeId) => void;
   /** 書式ショートカット (commands.ts のフォーマットID) */
   onFormatText?: (id: string) => void;
 }
@@ -37,22 +32,16 @@ export const Editor = React.memo(function Editor({
   showLineNumbers = true,
   fontSizePx,
   fontFamily,
-  onAiContinue,
-  onAiShortcut,
   onFormatText
 }: EditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   const onReadyRef = useRef(onReady);
   const getDocDirRef = useRef(getDocDir);
-  const onAiContinueRef = useRef(onAiContinue);
-  const onAiShortcutRef = useRef(onAiShortcut);
   const onFormatTextRef = useRef(onFormatText);
   onChangeRef.current = onChange;
   onReadyRef.current = onReady;
   getDocDirRef.current = getDocDir;
-  onAiContinueRef.current = onAiContinue;
-  onAiShortcutRef.current = onAiShortcut;
   onFormatTextRef.current = onFormatText;
 
   useEffect(() => {
@@ -74,28 +63,12 @@ export const Editor = React.memo(function Editor({
       void onFile(file, view, pos?.pos ?? null);
     };
     const handleDragOver = (e: DragEvent) => e.preventDefault();
-    // Ctrl+Space: AIで続きを書き、確認なしで挿入する (IME変換中は無視)
-    // Ctrl+Shift+S/Q/E: AI要約 / AI質問・編集代行メニューを開く
     // 書式ショートカット: FORMAT_SHORTCUTS (Ctrl+B/I/K/E、Ctrl+Shift+数字/L/O/.)
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.repeat) return;
       if (view.composing) return;
-      if (e.code === 'Space' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        onAiContinueRef.current?.();
-        return;
-      }
       if (e.altKey) return;
       if (e.shiftKey) {
-        const shortcut = onAiShortcutRef.current;
-        if (e.code === 'KeyS' || e.code === 'KeyQ' || e.code === 'KeyE') {
-          if (!shortcut) return;
-          e.preventDefault();
-          e.stopPropagation();
-          shortcut(e.code === 'KeyS' ? 'summary' : e.code === 'KeyQ' ? 'question' : 'edit');
-          return;
-        }
         const fmt = FORMAT_SHORTCUTS.find((f) => f.code === e.code && f.shift);
         if (fmt) {
           e.preventDefault();

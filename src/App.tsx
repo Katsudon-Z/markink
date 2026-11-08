@@ -1,34 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { EditorView } from 'prosemirror-view';
+import { NodeSelection, TextSelection, type Selection } from 'prosemirror-state';
+import { canCopyPng, copySelectionFormatted, copySelectionMarkdown, copySelectionPng } from './lib/prosemirror/officeDocument';
 import { Editor } from './components/Editor';
 import { Toolbar } from './components/Toolbar';
 import { CollaborationPanel } from './components/CollaborationPanel';
 import { StatusBar } from './components/StatusBar';
 import { applyFormat, createEditorState } from './lib/prosemirror/editor';
 import { insertImageAt } from './lib/prosemirror/image';
-import { bumpDocVersion } from './lib/mcp/docVersion';
-import { AI_CURSOR_COLOR } from './lib/mcp/presence';
+import { bumpDocumentVersion } from './lib/document/version';
 import { baseName, dirName, stem as stemOfPath, relativePath, toFileUri } from './lib/path';
 import { ipc } from './lib/ipc';
 import { useAutosave, serializeView } from './hooks/useAutosave';
 import { useCollabSession } from './hooks/useCollabSession';
 import { useDocumentActions, useStartupFile, UNTITLED } from './hooks/useDocumentActions';
-import { useMcpBridge } from './hooks/useMcpBridge';
-import { useAiCall } from './hooks/useAiCall';
-import { AiSettingsPanel } from './components/AiSettingsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
-import { AiContextMenu } from './components/AiContextMenu';
-import { AiResultDialog } from './components/AiResultDialog';
 import { RightPane } from './components/RightPane';
 import { MenuDropdown } from './components/MenuDropdown';
-import { aiModeLabel } from './lib/ai/context';
-import { MCP_FEATURE_ENABLED } from './lib/features';
+import { ExtensionHost } from './lib/plugins/extensionHost';
+import { PluginManagerPanel } from './components/PluginManagerPanel';
+import { PluginManager } from './lib/plugins/manager';
+import { WorkerRuntime } from './lib/plugins/workerRuntime';
+import { installedManifest } from './lib/plugins/info';
+import type { RegisteredCommand } from './lib/plugins/commands';
+import type { PluginPermission } from './lib/plugins/api';
+import { openPluginEditorWindow } from './lib/plugins/editorWindow';
 
 function App() {
   const [showCollab, setShowCollab] = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [showAi, setShowAi] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPlugins, setShowPlugins] = useState(false);
   // 起動時の初期画面 (ロゴ + 新規作成/開く)。ファイルを開いたら閉じる
   const [showStartScreen, setShowStartScreen] = useState(true);
   // Markdownソース表示 (読み取り専用)
@@ -51,6 +53,7 @@ function App() {
   const [fontFamily, setFontFamily] = useState('');
 
   const viewRef = useRef<EditorView | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
   const dirRef = useRef<string | null>(null);
   const pathRef = useRef<string | null>(null);
   const getView = useCallback(() => viewRef.current, []);
@@ -93,7 +96,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     void ipc
-      .mcpGetSettings()
+      .getSettings()
       .then((s) => {
         if (cancelled) return;
         restoreEnabledRef.current = s.restoreEnabled;
@@ -206,81 +209,209 @@ function App() {
     void docRef.current?.openByPath(path);
   });
 
-  // AI共同編集 (MCP): Rust gateway からのツール実行要求を受ける
-  const getMcpTitle = useCallback(() => docRef.current?.title ?? UNTITLED, []);
-  const getMcpDirty = useCallback(() => autosave.isDirty(), [autosave]);
-  const getMcpAutoSave = useCallback(() => ipc.mcpGetAiAutoSave(), []);
-  const saveMcpDocument = useCallback(
-    () =>
-      new Promise<{ path: string }>((resolve, reject) => {
-        const docApi = docRef.current;
-        const currentPath = pathRef.current;
-        if (!docApi) {
-          reject(new Error('文書操作が準備できていません'));
-          return;
-        }
-        if (!currentPath) {
-          reject(
-            new Error('まだファイルに保存されていない文書です。人間が「保存」で保存してから実行してください')
-          );
-          return;
-        }
-        docApi.saveCurrent(() => resolve({ path: currentPath }));
-      }),
-    []
-  );
-  const [aiConfirm, setAiConfirm] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(
+  const getDocumentTitle = useCallback(() => docRef.current?.title ?? UNTITLED, []);
+  const [editConfirm, setEditConfirm] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(
     null
   );
-  const confirmMcpReplace = useCallback(
+  const confirmPluginReplace = useCallback(
     (summary: string) =>
       new Promise<boolean>((resolve) => {
-        setAiConfirm({
+        setEditConfirm({
           summary,
           resolve: (ok) => {
-            setAiConfirm(null);
+            setEditConfirm(null);
             resolve(ok);
           }
         });
       }),
     []
   );
-  // AIからの人間向け通知 (トースト表示・6秒で自動消去)
-  const [aiNotice, setAiNotice] = useState<{ id: number; message: string } | null>(null);
+  // プラグインからの通知 (トースト表示・6秒で自動消去)
+  const [notice, setNotice] = useState<{ id: number; message: string } | null>(null);
   useEffect(() => {
-    if (!aiNotice) return;
-    const timer = setTimeout(() => setAiNotice(null), 6000);
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
     return () => clearTimeout(timer);
-  }, [aiNotice]);
-  const notifyMcpHuman = useCallback(
-    (message: string) => setAiNotice({ id: Date.now(), message }),
+  }, [notice]);
+  const notifyHuman = useCallback(
+    (message: string) => setNotice({ id: Date.now(), message }),
     []
   );
-  const mcp = useMcpBridge({
-    getView,
-    getTitle: getMcpTitle,
-    getPath: getDocPath,
-    isDirty: getMcpDirty,
-    saveDocument: saveMcpDocument,
-    confirmFullReplace: confirmMcpReplace,
-    aiAutoSaveEnabled: getMcpAutoSave,
-    notifyHuman: notifyMcpHuman
-  });
-
+  const [pluginResult, setPluginResult] = useState<{
+    title: string; text: string; canReplace: boolean;
+    resolve: (choice: 'insert' | 'replace' | 'cancel') => void;
+  } | null>(null);
+  const pluginResultPending = useRef(false);
+  const pluginResultRef = useRef<{ pluginId: string; resolve: (choice: 'insert' | 'replace' | 'cancel') => void } | null>(null);
+  const pluginEditorRef = useRef<{ pluginId: string; cancel: () => void } | null>(null);
+  const showPluginResult = useCallback((pluginId: string, title: string, text: string, canReplace: boolean) => {
+    if (pluginResultPending.current || pluginEditorRef.current) return Promise.reject(new Error('別のダイアログを表示中です'));
+    pluginResultPending.current = true;
+    return new Promise<'insert' | 'replace' | 'cancel'>((resolve) => {
+      const finish = (choice: 'insert' | 'replace' | 'cancel') => {
+        pluginResultRef.current = null;
+        pluginResultPending.current = false;
+        setPluginResult(null);
+        resolve(choice);
+      };
+      pluginResultRef.current = { pluginId, resolve: finish };
+      setPluginResult({ title, text, canReplace, resolve: finish });
+    });
+  }, []);
+  const openPluginEditor = useCallback((pluginId: string, title: string, html: string, onApply?: (value: string) => Promise<void>, onCopy?: (format: string, value: string) => Promise<void>) => {
+    if (pluginEditorRef.current || pluginResultPending.current) return Promise.reject(new Error('別のダイアログを表示中です'));
+    const editor = openPluginEditorWindow(title, html, onApply, onCopy);
+    pluginEditorRef.current = { pluginId, cancel: editor.cancel };
+    return editor.result.finally(() => { pluginEditorRef.current = null; });
+  }, []);
+  const cancelPluginDialogs = useCallback((pluginId: string) => {
+    if (pluginResultRef.current?.pluginId === pluginId) {
+      pluginResultRef.current.resolve('cancel');
+    }
+    if (pluginEditorRef.current?.pluginId === pluginId) pluginEditorRef.current.cancel();
+  }, []);
+  const extensionHost = useMemo(
+    () =>
+      new ExtensionHost({
+        getView,
+        getTitle: getDocumentTitle,
+        confirmEdit: (proposal) =>
+          confirmPluginReplace(
+            proposal.reason ?? 'プラグインが文書全体を置き換えようとしています。続けますか？'
+          ),
+        notify: (_pluginId, message) => notifyHuman(message),
+        log: (pluginId, event) => ipc.writePluginLog(pluginId, event.level, event.message),
+        getSetting: (pluginId, key) => ipc.pluginGetSetting(pluginId, key),
+        setSetting: (pluginId, key, value) => ipc.pluginSetSetting(pluginId, key, value),
+        requestJson: (pluginId, url, body, useApiKey, timeoutSecs) => ipc.pluginRequestJson(pluginId, url, body, useApiKey, timeoutSecs),
+        prompt: (_pluginId, label, initialValue) => Promise.resolve(window.prompt(label, initialValue)),
+        showResult: showPluginResult,
+        openEditor: openPluginEditor,
+        readPackageText: (pluginId, path) => ipc.pluginReadPackageText(pluginId, path),
+        cancelDialogs: cancelPluginDialogs
+      }),
+    [getView, getDocumentTitle, confirmPluginReplace, notifyHuman, showPluginResult, openPluginEditor, cancelPluginDialogs]
+  );
+  const pluginCommands = useSyncExternalStore(
+    extensionHost.commands.subscribe,
+    extensionHost.commands.getSnapshot,
+    extensionHost.commands.getSnapshot
+  );
+  const pluginManagerRef = useRef<PluginManager | null>(null);
+  const [busyPlugins, setBusyPlugins] = useState<Record<string, number>>({});
+  const runPluginCommand = useCallback(async (item: RegisteredCommand) => {
+    setBusyPlugins((current) => ({ ...current, [item.pluginId]: (current[item.pluginId] ?? 0) + 1 }));
+    try {
+      await item.run();
+    } finally {
+      setBusyPlugins((current) => {
+        const next = { ...current };
+        if ((next[item.pluginId] ?? 0) <= 1) delete next[item.pluginId];
+        else next[item.pluginId] -= 1;
+        return next;
+      });
+    }
+  }, []);
+  const displayPluginCommands = useMemo(() => pluginCommands.map((item) => ({
+    ...item, run: () => runPluginCommand(item)
+  })), [pluginCommands, runPluginCommand]);
+  useEffect(() => {
+    const onRendererCommand = (event: Event) => {
+      const detail = (event as CustomEvent<{ pluginId: string; commandId: string }>).detail;
+      if (!detail) return;
+      const command = pluginCommands.find((item) => item.pluginId === detail.pluginId
+        && item.command.id === detail.commandId && item.command.contextMenu);
+      if (command) void runPluginCommand(command).catch((error) => notifyHuman(String(error)));
+    };
+    window.addEventListener('markink-render-command', onRendererCommand);
+    return () => window.removeEventListener('markink-render-command', onRendererCommand);
+  }, [pluginCommands, runPluginCommand, notifyHuman]);
+  const [pluginMenu, setPluginMenu] = useState<{ x: number; y: number } | null>(null);
+  const pluginMenuRef = useRef<HTMLDivElement | null>(null);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const runSelectionCopy = async (format: 'markdown' | 'formatted' | 'png') => {
+    const view = viewRef.current;
+    setPluginMenu(null);
+    if (!view || copyBusy) return;
+    setCopyBusy(true);
+    try { await (format === 'markdown' ? copySelectionMarkdown(view) : format === 'formatted' ? copySelectionFormatted(view) : copySelectionPng(view)); }
+    catch (error) { notifyHuman(String(error)); }
+    finally { setCopyBusy(false); }
+  };
+  useEffect(() => {
+    const onContextMenu = (event: Event) => {
+      const detail = (event as CustomEvent<{ x: number; y: number }>).detail;
+      if (detail) setPluginMenu(detail);
+    };
+    window.addEventListener('markink-copy-context-menu', onContextMenu);
+    return () => window.removeEventListener('markink-copy-context-menu', onContextMenu);
+  }, []);
+  useEffect(() => {
+    if (!pluginMenu) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!pluginMenuRef.current?.contains(event.target as Node)) setPluginMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPluginMenu(null);
+    };
+    document.addEventListener('mousedown', closeOutside, true);
+    document.addEventListener('keydown', closeOnEscape, true);
+    return () => {
+      document.removeEventListener('mousedown', closeOutside, true);
+      document.removeEventListener('keydown', closeOnEscape, true);
+    };
+  }, [pluginMenu]);
+  useEffect(() => {
+    const onPluginShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.repeat || event.isComposing) return;
+      const shortcut = `Mod-${event.shiftKey ? 'Shift-' : ''}${event.code}`;
+      const command = pluginCommands.find((item) => item.command.shortcut === shortcut);
+      if (!command) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void runPluginCommand(command).catch((error) => notifyHuman(String(error)));
+    };
+    document.addEventListener('keydown', onPluginShortcut, true);
+    return () => document.removeEventListener('keydown', onPluginShortcut, true);
+  }, [pluginCommands, notifyHuman, runPluginCommand]);
+  const pluginManager = useMemo(() => new PluginManager({
+    runtime: new WorkerRuntime((id, error) => {
+      void pluginManagerRef.current?.fail(id, error);
+      notifyHuman(`プラグイン ${id} が停止しました: ${error}`);
+    }),
+    createHostApi: (manifest, permissions) => extensionHost.createApi(manifest, permissions)
+  }), [extensionHost, notifyHuman]);
+  pluginManagerRef.current = pluginManager;
+  const pluginRestoreStarted = useRef(false);
+  useEffect(() => {
+    if (!editorReady || pluginRestoreStarted.current) return;
+    pluginRestoreStarted.current = true;
+    void (async () => {
+      try {
+        const [installed, enabledIds] = await Promise.all([ipc.pluginList(), ipc.pluginEnabledIds()]);
+        const enabled = new Set(enabledIds);
+        for (const plugin of installed) {
+          if (!enabled.has(plugin.id)) continue;
+          try {
+            const manifest = installedManifest(plugin);
+            await pluginManager.enable(manifest, new Set(manifest.permissions as PluginPermission[]));
+          } catch (error) {
+            notifyHuman(`プラグイン ${plugin.id} を再開できません: ${String(error)}`);
+          }
+        }
+      } catch (error) {
+        notifyHuman(`プラグインの有効状態を復元できません: ${String(error)}`);
+      }
+    })();
+  }, [editorReady, pluginManager, notifyHuman]);
   const handleReady = useCallback(
     (view: EditorView) => {
       viewRef.current = view;
+      setEditorReady(true);
       void autosave.loadRestoreCandidate();
     },
     [autosave]
   );
-
-  // ---- エディタ起点のAI呼び出し (右クリックメニュー → 結果ダイアログ) ----
-  const ai = useAiCall({
-    getView,
-    notifyHuman: notifyMcpHuman,
-    onOpenSettings: () => setShowSettings(true)
-  });
 
   const handleFormat = useCallback((format: string, payload?: { href?: string }) => {
     if (!viewRef.current) return;
@@ -346,11 +477,6 @@ function App() {
   }, []);
 
   const handleToggleComments = useCallback(() => setShowComments((v) => !v), []);
-
-  // 参加者一覧 (人間 + AI。パネルと右ペインで共有)
-  const peersWithAi = mcp.aiName
-    ? [...collab.peers, { clientID: -1, name: mcp.aiName, color: AI_CURSOR_COLOR, ai: true }]
-    : collab.peers;
 
   // ファイル名はウィンドウ枠 (タイトルバー) に表示する
   useEffect(() => {
@@ -421,16 +547,16 @@ function App() {
         </div>
       )}
 
-      {aiConfirm && (
-        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="ai-confirm-title">
+      {editConfirm && (
+        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="edit-confirm-title">
           <div className="restore-dialog">
-            <h2 id="ai-confirm-title" className="restore-title">AIからの置換要求</h2>
-            <p className="restore-message">{aiConfirm.summary}</p>
+            <h2 id="edit-confirm-title" className="restore-title">文書編集の確認</h2>
+            <p className="restore-message">{editConfirm.summary}</p>
             <div className="restore-actions">
-              <button className="btn btn-primary" onClick={() => aiConfirm.resolve(true)}>
+              <button className="btn btn-primary" onClick={() => editConfirm.resolve(true)}>
                 許可する
               </button>
-              <button className="btn" onClick={() => aiConfirm.resolve(false)}>
+              <button className="btn" onClick={() => editConfirm.resolve(false)}>
                 拒否する
               </button>
             </div>
@@ -477,7 +603,7 @@ function App() {
             onClick={() => {
               const md = serializeView(viewRef.current);
               if (md == null) {
-                notifyMcpHuman('エディタが準備できていません');
+                notifyHuman('エディタが準備できていません');
                 return;
               }
               setMdCopied(false);
@@ -487,25 +613,21 @@ function App() {
             Markdown表示
           </button>
           <button className="btn" onClick={() => setShowCollab((v) => !v)}>共同編集</button>
-          {MCP_FEATURE_ENABLED && (
-            <button className="btn" onClick={() => setShowAi((v) => !v)}>AI接続</button>
-          )}
           <button className="btn" onClick={() => setShowSettings((v) => !v)}>設定</button>
+          <button className="btn" onClick={() => setShowPlugins((v) => !v)}>プラグイン</button>
         </div>
         <div className="app-status">
+          {Object.keys(busyPlugins).map((id) => (
+            <button key={id} className="btn" title={`${id} を停止`} onClick={() => {
+              void (async () => {
+                await ipc.pluginSetEnabled(id, false);
+                await pluginManagerRef.current?.disable(id);
+              })().catch((error) => notifyHuman(String(error)));
+            }}>{id} · 停止</button>
+          ))}
           {collab.active && (
             <span className="app-status-badge collab" title="共同編集中">
               共同編集中 ({collab.peers.length}人)
-            </span>
-          )}
-          {mcp.aiName && (
-            <span className="app-status-badge ai" title={`AIが編集中: ${mcp.aiName}`}>
-              {mcp.aiName}
-            </span>
-          )}
-          {(ai.aiBusy || ai.directBusy || mcp.toolBusy) && (
-            <span className="app-status-badge ai processing" title="AIが処理中です">
-              AI処理中…
             </span>
           )}
         </div>
@@ -515,6 +637,7 @@ function App() {
         onFormat={handleFormat}
         showComments={showComments}
         onToggleComments={handleToggleComments}
+        extensionCommands={displayPluginCommands}
       />
 
       {showCollab && (
@@ -523,7 +646,7 @@ function App() {
           roomName={collab.roomName}
           suggestedRoom={suggestedRoom}
           positionLabel={collab.roleLabel ?? undefined}
-          peers={peersWithAi}
+          peers={collab.peers}
           diagnostics={collab.diagnostics}
           showCursors={collab.showCursors}
           onShowCursorsChange={collab.setShowCursors}
@@ -541,14 +664,12 @@ function App() {
               if (view && markdown != null) {
                 // 結合結果で文書を置換するため、版を明示的に進める
                 view.updateState(createEditorState(markdown));
-                bumpDocVersion('human');
+                bumpDocumentVersion(view.state.doc);
               }
             });
           }}
         />
       )}
-
-      {showAi && MCP_FEATURE_ENABLED && <AiSettingsPanel onClose={() => setShowAi(false)} />}
 
       {showSettings && (
         <SettingsPanel
@@ -564,7 +685,39 @@ function App() {
         />
       )}
 
-      <main className="app-main" onContextMenu={ai.handleContextMenu}>
+      {pluginResult && (
+        <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="plugin-result-title">
+          <div className="restore-dialog settings-dialog">
+            <h2 id="plugin-result-title" className="restore-title">{pluginResult.title}</h2>
+            <pre className="settings-dialog-code plugin-result-pre">{pluginResult.text}</pre>
+            <div className="restore-actions">
+              <button className="btn btn-primary" onClick={() => pluginResult.resolve('insert')}>挿入</button>
+              {pluginResult.canReplace && <button className="btn" onClick={() => pluginResult.resolve('replace')}>選択範囲を置換</button>}
+              <button className="btn" onClick={() => pluginResult.resolve('cancel')}>閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPlugins && <PluginManagerPanel manager={pluginManager} onClose={() => setShowPlugins(false)} />}
+
+      <main className="app-main" onContextMenu={(event) => {
+        if (!(event.target instanceof Element) || !event.target.closest('.ProseMirror')) return;
+        event.preventDefault();
+        const view = viewRef.current;
+        const position = view?.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        if (view && position != null && view.state.selection.empty) {
+          const target = event.target.closest('img');
+          let selection: Selection = TextSelection.near(view.state.doc.resolve(position));
+          if (target) {
+            const imagePos = view.posAtDOM(target, 0);
+            const node = view.state.doc.nodeAt(imagePos);
+            if (node?.type.name === 'image') selection = NodeSelection.create(view.state.doc, imagePos);
+          }
+          view.dispatch(view.state.tr.setSelection(selection));
+        }
+        setPluginMenu({ x: event.clientX, y: event.clientY });
+      }}>
         <Editor
           onReady={handleReady}
           onChange={autosave.markDirty}
@@ -573,48 +726,28 @@ function App() {
           showLineNumbers={showLineNumbers}
           fontSizePx={fontSizePx}
           fontFamily={fontFamily}
-          onAiContinue={ai.continueDirectly}
-          onAiShortcut={ai.handleAiShortcut}
           onFormatText={handleFormat}
         />
         <RightPane
           getView={getView}
-          peers={peersWithAi}
-          aiName={mcp.aiName}
+          peers={collab.peers}
           collabActive={collab.active}
         />
       </main>
 
-      {ai.aiMenu && (
-        <AiContextMenu
-          x={ai.aiMenu.x}
-          y={ai.aiMenu.y}
-          enabled={ai.aiEnabled}
-          contextChars={ai.aiMenu.contextChars}
-          hasSelection={ai.aiMenu.hasSelection}
-          autoFocusPrompt={ai.aiMenu.focusPrompt}
-          onExecute={ai.executeAi}
-          onCopy={ai.copySelection}
-          onCut={ai.cutSelection}
-          onPaste={ai.pasteFromClipboard}
-          onClose={ai.closeAiMenu}
-          onOpenSettings={ai.openSettingsFromMenu}
-        />
-      )}
-
-      {(ai.aiBusy || ai.aiRun) && (
-        <AiResultDialog
-          title={aiModeLabel((ai.aiBusy ?? ai.aiRun)?.mode ?? 'question')}
-          busy={ai.aiBusy != null}
-          elapsedSecs={ai.aiElapsed}
-          text={ai.aiRun?.text ?? ''}
-          canReplace={ai.aiRun?.hasSelection === true || ai.aiRun?.mode === 'edit'}
-          error={ai.aiRun?.error ?? null}
-          onInsert={ai.applyAiInsert}
-          onReplace={ai.applyAiReplace}
-          onAbort={ai.abortAi}
-          onClose={ai.closeAiDialog}
-        />
+      {pluginMenu && (
+        <div ref={pluginMenuRef} className="plugin-context-menu" onMouseDown={event => event.preventDefault()} style={{ position: 'fixed', left: Math.max(0, Math.min(pluginMenu.x, window.innerWidth - 270)), top: Math.max(0, Math.min(pluginMenu.y, window.innerHeight - 320)), zIndex: 1000 }}>
+          <button className="plugin-menu-item" disabled={copyBusy || !viewRef.current || viewRef.current.state.selection.empty} onClick={() => void runSelectionCopy('markdown')}>マークダウンコピー</button>
+          <button className="plugin-menu-item" disabled={copyBusy || !viewRef.current || viewRef.current.state.selection.empty} onClick={() => void runSelectionCopy('formatted')}>書式付きコピー</button>
+          {viewRef.current && canCopyPng(viewRef.current) && <button className="plugin-menu-item" disabled={copyBusy} onClick={() => void runSelectionCopy('png')}>PNG画像コピー</button>}
+          {pluginCommands.filter((item) => item.command.contextMenu).map((item) => (
+            <button key={item.key} className="plugin-menu-item" onClick={() => {
+              setPluginMenu(null);
+              void runPluginCommand(item).catch((error) => notifyHuman(String(error)));
+            }}>{item.command.title}</button>
+          ))}
+          <button className="plugin-menu-item" onClick={() => setPluginMenu(null)}>閉じる</button>
+        </div>
       )}
 
       <StatusBar
@@ -622,7 +755,6 @@ function App() {
         collabActive={collab.active}
         peersCount={collab.peers.length}
         diagnostics={collab.diagnostics}
-        aiName={mcp.aiName}
       />
 
       {showStartScreen && (
@@ -682,9 +814,9 @@ function App() {
 
       {markdownSource != null && (
         <div className="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="md-source-title">
-          <div className="restore-dialog ai-settings">
+          <div className="restore-dialog settings-dialog">
             <h2 id="md-source-title" className="restore-title">Markdownソース (読み取り専用)</h2>
-            <pre className="ai-settings-code ai-result-pre">{markdownSource}</pre>
+            <pre className="settings-dialog-code plugin-result-pre">{markdownSource}</pre>
             <div className="restore-actions">
               <button
                 className="btn"
@@ -692,7 +824,7 @@ function App() {
                   void navigator.clipboard
                     ?.writeText(markdownSource)
                     .then(() => setMdCopied(true))
-                    .catch(() => notifyMcpHuman('コピーに失敗しました'));
+                    .catch(() => notifyHuman('コピーに失敗しました'));
                 }}
               >
                 {mdCopied ? 'コピーしました' : 'コピー'}
@@ -705,10 +837,10 @@ function App() {
         </div>
       )}
 
-      {aiNotice && (
-        <div className="ai-toast" role="status" key={aiNotice.id}>
-          <span className="ai-toast-name">AI</span>
-          <span>{aiNotice.message}</span>
+      {notice && (
+        <div className="plugin-toast" role="status" key={notice.id}>
+          <span className="plugin-toast-name">プラグイン</span>
+          <span>{notice.message}</span>
         </div>
       )}
     </div>

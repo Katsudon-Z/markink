@@ -1,0 +1,33 @@
+{
+  "id": "markink.mermaid-editor",
+  "name": "Mermaid エディタ",
+  "version": "1.7.0",
+  "apiVersion": 1,
+  "description": "Mermaid図の作成・編集・表示と、Mermaid記法・PNG・PowerPoint図のコピーを行います。",
+  "author": "markink",
+  "entry": "index.js",
+  "permissions": [
+    "document.read",
+    "document.edit",
+    "ui.register",
+    "ui.dialog",
+    "package.read",
+    "clipboard.write",
+    "office.copy"
+  ],
+  "fileHashes": {
+    "index.js": "dd6318ef31de102017b79e1ea204a1e67c60a1f22f61ba13755d447e29b9149f",
+    "office-drawing.js": "f16119fe45bc674778e974e93376a216b29b6b383d7216674158ad60f31f3c22",
+    "sequence-office-drawing.js": "811e0ad3446c6de82e638e36e7ea8eee82ab5f7d293636954f6bd8d24bf15eb4",
+    "sequence-example.md": "66caed1266fed0dcef1aa9abdb8543a76c17abbd6f4677a3bde94966366c250f",
+    "state-office-drawing.js": "1d5e5e9bfeec32270b45f9e27f527c598401fc729008bc51d4f2161dc7cf5090",
+    "state-example.md": "2d4e6fea75795ef27022c2f31952b6c846f1e3d6b8732ee985e5778b95c4b39f",
+    "pie-office-drawing.js": "17e3794cccd42b5dbc9dbb3762f50888e4196709ab9a7f347594aaec42b17957",
+    "pie-example.md": "55561100a7a8cffe8a807ce8de899aaaa9b82b58c128a2ce9bd1740441e48a75",
+    "architecture-office-drawing.js": "bca07b09456bad70e64f16a5e15b97567a2060123d1866e73af61bf25834a80c",
+    "architecture-example.md": "238c9958b51a1deba45448dcb71bf43dd5089c3f7c2d15c25569bd52f25a9df6",
+    "mermaid.bundle.js": "97b6f0b6cdbbe12266f6975aef0b73952d29e3abb43052d383f77099fac272f7",
+    "README.md": "d2f82e5dce1de19a6fe707bec7ac7d19ff0418641e253175df82f7c719fb2651",
+    "THIRD_PARTY_NOTICES.txt": "600031cd8d73a56288146babca4eac3750bc85788e8643205f621498688f566a"
+  }
+}

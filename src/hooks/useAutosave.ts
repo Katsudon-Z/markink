@@ -95,7 +95,7 @@ export function useAutosave({ getView, getRoomName, getDocPath, getRestoreEnable
     timer.current = setTimeout(flush, AUTOSAVE_DEBOUNCE_MS);
   }, [flush, getRestoreEnabled]);
 
-  /** 未保存の変更があるか (MCP get_document の dirty 応答用) */
+  /** 未保存の変更があるか。 */
   const isDirty = useCallback(() => dirty.current, []);
 
   /** 保留中の保存を即時実行 (終了時・保存時など) */
